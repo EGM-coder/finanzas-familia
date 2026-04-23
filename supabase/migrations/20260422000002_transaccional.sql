@@ -18,22 +18,6 @@ as $$
   )
 $$;
 
--- Función helper: ¿puede el usuario actual ver esta transacción?
--- Navega transaction → account y reutiliza la lógica de visibilidad
-create or replace function public.can_see_transaction(p_transaction_id uuid)
-returns boolean
-language sql
-security definer stable
-set search_path = public
-as $$
-  select exists (
-    select 1 from public.transactions t
-    join public.accounts a on a.id = t.account_id
-    where t.id = p_transaction_id
-      and (a.visibility = 'privada_' || public.user_role() or a.visibility = 'compartida')
-  )
-$$;
-
 -- ============================================================
 -- TABLA: transactions
 -- Visibilidad heredada de la cuenta referenciada (account_id)
@@ -82,6 +66,22 @@ create policy "transactions_update" on public.transactions
   for update
   using  (public.can_see_account(account_id))
   with check (public.can_see_account(account_id));
+
+-- Función helper: ¿puede el usuario actual ver esta transacción?
+-- Se define AQUÍ porque transactions ya existe en este punto
+create or replace function public.can_see_transaction(p_transaction_id uuid)
+returns boolean
+language sql
+security definer stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.transactions t
+    join public.accounts a on a.id = t.account_id
+    where t.id = p_transaction_id
+      and (a.visibility = 'privada_' || public.user_role() or a.visibility = 'compartida')
+  )
+$$;
 
 -- ============================================================
 -- TABLA: transaction_splits
