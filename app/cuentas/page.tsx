@@ -36,25 +36,21 @@ export default async function CuentasPage() {
 
   const [
     { data: accountsRaw },
-    { data: balancesRaw },
     { data: liabilitiesRaw },
     { data: profileData },
   ] = await Promise.all([
-    supabase.from('accounts').select('*').eq('is_active', true).order('sort_order'),
-    supabase.from('account_balances').select('*'),
+    supabase.from('account_balances_full').select('*').eq('is_active', true).order('sort_order'),
     supabase.from('liabilities').select('*').eq('is_active', true),
     supabase.from('profiles').select('role').eq('user_id', user.id).single(),
   ])
 
   const userRole = (profileData?.role ?? 'eric') as 'eric' | 'ana'
 
-  // Merge saldos en array plano — cada fila de BD contada una sola vez
-  const balanceMap = new Map(
-    (balancesRaw ?? []).map(b => [b.account_id, Number(b.current_balance)])
-  )
   const accounts: AccountWithBalance[] = (accountsRaw ?? []).map(a => ({
     ...(a as Account),
-    current_balance: balanceMap.get(a.id) ?? Number(a.initial_balance),
+    current_balance: Number(a.current_balance),
+    transactions_sum: Number(a.transactions_sum),
+    holdings_value_eur: Number(a.holdings_value_eur),
     cards: [],
   }))
 

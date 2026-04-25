@@ -15,6 +15,8 @@ export interface Account {
   sort_order: number
   initial_balance: number
   linked_account_id: string | null
+  transactions_sum: number
+  holdings_value_eur: number
 }
 
 export interface AccountWithBalance extends Account {
