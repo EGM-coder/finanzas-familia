@@ -48,8 +48,18 @@ export interface GrupoSection {
   total: number
 }
 
+export interface PatrimonioNetoRow {
+  liquidos_y_holdings: number
+  inmuebles: number
+  activos_total: number
+  deudas_activas: number
+  deudas_proyectadas: number
+  patrimonio_neto_actual: number
+  patrimonio_neto_si_firmara_hoy: number
+}
+
 export interface CuentasPageData {
   secciones: GrupoSection[]
-  patrimonioNeto: number
+  patrimonioDetalle: PatrimonioNetoRow
   userRole: 'eric' | 'ana'
 }

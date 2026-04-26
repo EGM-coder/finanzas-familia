@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import CuentasClient from './CuentasClient'
 import type {
   Account, AccountWithBalance, Liability,
-  GrupoSection, CuentasPageData, SectionId,
+  GrupoSection, CuentasPageData, SectionId, PatrimonioNetoRow,
 } from '@/types/cuentas'
 
 function classifyAccount(name: string): SectionId {
@@ -38,10 +38,12 @@ export default async function CuentasPage() {
     { data: accountsRaw },
     { data: liabilitiesRaw },
     { data: profileData },
+    { data: patrimonioRaw },
   ] = await Promise.all([
     supabase.from('account_balances_full').select('*').eq('is_active', true).order('sort_order'),
     supabase.from('liabilities').select('*').eq('is_active', true),
     supabase.from('profiles').select('role').eq('user_id', user.id).single(),
+    supabase.from('patrimonio_neto').select('*').single(),
   ])
 
   const userRole = (profileData?.role ?? 'eric') as 'eric' | 'ana'
@@ -85,10 +87,21 @@ export default async function CuentasPage() {
     return { id: sid, ...SECTION_META[sid], accounts: accs, liabilities: libs, total }
   })
 
-  // Patrimonio neto = suma del array plano (sin jerarquía) − pasivos
-  const totalActivos = accounts.reduce((s, a) => s + a.current_balance, 0)
-  const totalPasivos = liabilities.reduce((s, l) => s + Number(l.current_balance), 0)
-  const patrimonioNeto = totalActivos - totalPasivos
+  const patrimonioDetalle: PatrimonioNetoRow = patrimonioRaw
+    ? {
+        liquidos_y_holdings:           Number(patrimonioRaw.liquidos_y_holdings),
+        inmuebles:                     Number(patrimonioRaw.inmuebles),
+        activos_total:                 Number(patrimonioRaw.activos_total),
+        deudas_activas:                Number(patrimonioRaw.deudas_activas),
+        deudas_proyectadas:            Number(patrimonioRaw.deudas_proyectadas),
+        patrimonio_neto_actual:        Number(patrimonioRaw.patrimonio_neto_actual),
+        patrimonio_neto_si_firmara_hoy: Number(patrimonioRaw.patrimonio_neto_si_firmara_hoy),
+      }
+    : {
+        liquidos_y_holdings: 0, inmuebles: 0, activos_total: 0,
+        deudas_activas: 0, deudas_proyectadas: 0,
+        patrimonio_neto_actual: 0, patrimonio_neto_si_firmara_hoy: 0,
+      }
 
-  return <CuentasClient data={{ secciones, patrimonioNeto, userRole }} />
+  return <CuentasClient data={{ secciones, patrimonioDetalle, userRole }} />
 }

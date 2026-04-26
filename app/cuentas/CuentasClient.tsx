@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { CuentasPageData, GrupoSection, AccountWithBalance, Liability } from '@/types/cuentas'
+import PatrimonioNetoCard from './PatrimonioNetoCard'
 
 // ── Paleta ────────────────────────────────────────────────────
 const C = {
@@ -188,7 +189,7 @@ function SeccionCard({
 
 // ── Componente principal ──────────────────────────────────────
 export default function CuentasClient({ data }: { data: CuentasPageData }) {
-  const { secciones, patrimonioNeto, userRole } = data
+  const { secciones, patrimonioDetalle, userRole } = data
   const [visible, setVisible] = useState(true)
   const [open, setOpen] = useState<Set<string>>(new Set(['corriente']))
 
@@ -220,24 +221,6 @@ export default function CuentasClient({ data }: { data: CuentasPageData }) {
         </button>
       </div>
 
-      {/* Patrimonio neto */}
-      <div style={{ padding: '16px 20px 0' }}>
-        <div style={{ fontSize: 11, color: C.secondary, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-          Patrimonio neto familiar
-        </div>
-        <div style={{
-          fontFamily: 'Georgia, serif', fontSize: 34, fontWeight: 400, lineHeight: 1.1,
-          fontFeatureSettings: "'tnum'",
-          color: patrimonioNeto >= 0 ? C.text : C.negative,
-        }}>
-          {fmt(patrimonioNeto, visible)}
-        </div>
-        <div style={{ fontSize: 12, color: C.accent, marginTop: 5 }}>
-          vs. previsto 2026&nbsp;
-          <span style={{ fontFeatureSettings: "'tnum'" }}>+3.240,00 €</span>
-        </div>
-      </div>
-
       {/* Barra de asignación */}
       <div style={{ padding: '20px 20px 0' }}>
         <div style={{ fontSize: 10, color: C.secondary, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
@@ -264,8 +247,13 @@ export default function CuentasClient({ data }: { data: CuentasPageData }) {
         </div>
       </div>
 
+      {/* Patrimonio neto */}
+      <div style={{ padding: '20px 0 0' }}>
+        <PatrimonioNetoCard data={patrimonioDetalle} visible={visible} />
+      </div>
+
       {/* Secciones colapsables */}
-      <div style={{ padding: '20px 16px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ padding: '12px 16px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {secciones.map(sec => (
           <SeccionCard
             key={sec.id} sec={sec}
