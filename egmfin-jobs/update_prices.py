@@ -85,7 +85,7 @@ def fetch_price(ticker, isin, currency):
 
     try:
         t = yf.Ticker(yahoo_ticker)
-        hist = t.history(period="1d")
+        hist = t.history(period="5d")
         if hist.empty:
             return None, None, "sin datos"
         close = Decimal(str(hist["Close"].iloc[-1]))
