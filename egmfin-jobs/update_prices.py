@@ -33,7 +33,6 @@ TICKER_MAP = {
     "DXCM": "DXCM",
     "MSFT": "MSFT",
     "RIVN": "RIVN",
-    "NDX1.DE": "NDX1.DE",
 }
 
 ISIN_MAP = {
@@ -41,11 +40,14 @@ ISIN_MAP = {
 }
 
 
-def get_unique_holdings():
-    res = sb.table("holdings").select("ticker, isin, original_currency").eq("is_active", True).execute()
+def get_unique_tickers():
+    res_h = sb.table("holdings").select("ticker, isin, original_currency").eq("is_active", True).execute()
+    res_so = sb.table("stock_options").select("ticker, currency").eq("is_active", True).execute()
+
     seen = set()
     out = []
-    for h in res.data:
+
+    for h in res_h.data:
         key = (h["ticker"], h["isin"])
         if key not in seen:
             seen.add(key)
@@ -54,6 +56,17 @@ def get_unique_holdings():
                 "isin": h["isin"],
                 "currency": h["original_currency"]
             })
+
+    for so in res_so.data:
+        key = (so["ticker"], None)
+        if key not in seen:
+            seen.add(key)
+            out.append({
+                "ticker": so["ticker"],
+                "isin": None,
+                "currency": so["currency"]
+            })
+
     return out
 
 
@@ -80,7 +93,10 @@ def fetch_eur_rate(currency):
 
 
 def fetch_price(ticker, isin, currency):
-    yahoo_ticker = TICKER_MAP.get(ticker) if ticker else ISIN_MAP.get(isin)
+    if ticker:
+        yahoo_ticker = TICKER_MAP.get(ticker, ticker)
+    else:
+        yahoo_ticker = ISIN_MAP.get(isin) if isin else None
     if not yahoo_ticker:
         return None, None, f"sin mapeo ({ticker}/{isin})"
 
@@ -106,8 +122,8 @@ def fetch_price(ticker, isin, currency):
 
 def main():
     print(f"=== EGMFin update precios {TODAY} ===\n")
-    holdings = get_unique_holdings()
-    print(f"Holdings unicos: {len(holdings)}\n")
+    holdings = get_unique_tickers()
+    print(f"Tickers unicos: {len(holdings)}\n")
 
     inserted = 0
     skipped = 0
