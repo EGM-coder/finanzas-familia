@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import CuentasClient from './CuentasClient'
 import type {
   Account, AccountWithBalance, Liability,
-  GrupoSection, CuentasPageData, SectionId, PatrimonioNetoRow,
+  GrupoSection, CuentasPageData, SectionId, PatrimonioNetoRow, StockOptionValued,
 } from '@/types/cuentas'
 
 function classifyAccount(name: string): SectionId {
@@ -39,11 +39,13 @@ export default async function CuentasPage() {
     { data: liabilitiesRaw },
     { data: profileData },
     { data: patrimonioRaw },
+    { data: stockOptionsRaw },
   ] = await Promise.all([
     supabase.from('account_balances_full').select('*').eq('is_active', true).order('sort_order'),
     supabase.from('liabilities').select('*').eq('is_active', true),
     supabase.from('profiles').select('role').eq('user_id', user.id).single(),
     supabase.from('patrimonio_neto').select('*').single(),
+    supabase.from('stock_options_valued').select('*'),
   ])
 
   const userRole = (profileData?.role ?? 'eric') as 'eric' | 'ana'
@@ -103,5 +105,14 @@ export default async function CuentasPage() {
         patrimonio_neto_actual: 0, patrimonio_neto_si_firmara_hoy: 0,
       }
 
-  return <CuentasClient data={{ secciones, patrimonioDetalle, userRole }} />
+  const stockOptions = (stockOptionsRaw ?? []).map(o => ({
+    ...(o as StockOptionValued),
+    strike_price:       Number(o.strike_price),
+    intrinsic_per_option: Number(o.intrinsic_per_option),
+    intrinsic_total:    Number(o.intrinsic_total),
+    condition_min_price: Number(o.condition_min_price),
+    current_price_eur:  o.current_price_eur != null ? Number(o.current_price_eur) : null,
+  }))
+
+  return <CuentasClient data={{ secciones, patrimonioDetalle, stockOptions, userRole }} />
 }

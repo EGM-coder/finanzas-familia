@@ -58,8 +58,29 @@ export interface PatrimonioNetoRow {
   patrimonio_neto_si_firmara_hoy: number
 }
 
+export interface StockOptionValued {
+  id: string
+  package_name: string
+  ticker: string
+  num_options: number
+  strike_price: number
+  currency: string
+  vesting_date: string
+  exercise_window_start: string
+  exercise_window_end: string
+  condition_pct: number
+  current_price_eur: number | null
+  intrinsic_per_option: number
+  intrinsic_total: number
+  condition_min_price: number
+  condition_met: boolean
+  vested: boolean
+  exercisable_now: boolean
+}
+
 export interface CuentasPageData {
   secciones: GrupoSection[]
   patrimonioDetalle: PatrimonioNetoRow
+  stockOptions: StockOptionValued[]
   userRole: 'eric' | 'ana'
 }

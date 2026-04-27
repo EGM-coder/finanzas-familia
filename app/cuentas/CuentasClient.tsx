@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { CuentasPageData, GrupoSection, AccountWithBalance, Liability } from '@/types/cuentas'
 import PatrimonioNetoCard from './PatrimonioNetoCard'
+import StockOptionsCard from './StockOptionsCard'
 
 // ── Paleta ────────────────────────────────────────────────────
 const C = {
@@ -189,7 +190,7 @@ function SeccionCard({
 
 // ── Componente principal ──────────────────────────────────────
 export default function CuentasClient({ data }: { data: CuentasPageData }) {
-  const { secciones, patrimonioDetalle, userRole } = data
+  const { secciones, patrimonioDetalle, stockOptions, userRole } = data
   const [visible, setVisible] = useState(true)
   const [open, setOpen] = useState<Set<string>>(new Set(['corriente']))
 
@@ -251,6 +252,13 @@ export default function CuentasClient({ data }: { data: CuentasPageData }) {
       <div style={{ padding: '20px 0 0' }}>
         <PatrimonioNetoCard data={patrimonioDetalle} visible={visible} />
       </div>
+
+      {/* Stock options */}
+      {stockOptions.length > 0 && (
+        <div style={{ padding: '8px 0 0' }}>
+          <StockOptionsCard options={stockOptions} visible={visible} />
+        </div>
+      )}
 
       {/* Secciones colapsables */}
       <div style={{ padding: '12px 16px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
