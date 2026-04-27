@@ -32,18 +32,15 @@ Antes de tocar las vistas/tablas referenciadas, leer este archivo.
 - **Razón:** suma de pagos a cuenta entregados a COBLANSA, no precio total.
 - **Mantenimiento:** al firmar escritura → actualizar current_value al precio total contractual (509.100€) o tasación.
 
-## P-005 · UNIQUE en holding_prices con NULLs (PENDIENTE)
-- **Tabla:** `holding_prices`
-- **Problema:** la constraint `UNIQUE(ticker, isin, date)` no protege cuando ticker o isin son NULL → permite duplicados.
-- **Solución pendiente:** migración futura con `UNIQUE INDEX (COALESCE(ticker,''), COALESCE(isin,''), date)`.
-- **Workaround actual:** el script `update_prices.py` borra antes de insertar (esto se aplicó en algún momento, verificar antes de tocar).
-- **Riesgo:** ejecutar dos veces el script en el mismo día con datos diferentes → la vista coge el último insertado (puede no ser el correcto).
+## P-005 · UNIQUE en holding_prices con NULLs — ✅ RESUELTO (2026-04-27, migración 18)
+- **Solución aplicada:** DROP de la constraint original + `CREATE UNIQUE INDEX holding_prices_unique_idx ON holding_prices (COALESCE(ticker,''), COALESCE(isin,''), date)`.
+- **Script actualizado:** `update_prices.py` hace DELETE + INSERT en lugar de upsert, eliminando dependencia de la constraint como mecanismo de deduplicación.
 
 ## P-006 · Precio NDX1 en holding_prices sin holding asociado
 - **Tabla:** `holding_prices`
 - **Registro:** ticker = 'NDX1.DE', isin = NULL (migración 16).
 - **Razón:** `stock_options_valued` necesita el precio de NDX1 vía `holding_prices`, pero las stock options no son holdings. Se usa la misma tabla como fuente de precios genérica.
-- **Mantenimiento:** añadir NDX1.DE al `TICKER_MAP` de `update_prices.py` para que se actualice automáticamente con el resto de precios.
+- **Mantenimiento:** `get_unique_tickers()` ya incluye los tickers de `stock_options`, por lo que NDX1.DE se actualiza automáticamente cada vez que corre `update_prices.py`. El precio manual insertado en migración 16 fue machacado en la primera ejecución posterior del script.
 - **Riesgo si se toca:** si se limpia `holding_prices` filtrando por `account_id IS NOT NULL` o similar, este precio desaparece y `stock_options_valued` devuelve NULL en `current_price_eur`.
 
 ## P-007 · account_balances_full debe exponer is_active y sort_order

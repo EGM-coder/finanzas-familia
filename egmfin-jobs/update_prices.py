@@ -141,7 +141,20 @@ def main():
             skipped += 1
             continue
 
-        sb.table("holding_prices").upsert({
+        # Borrar precio previo del mismo día (defensa frente a duplicados)
+        del_q = sb.table("holding_prices").delete().eq("date", TODAY)
+        if ticker:
+            del_q = del_q.eq("ticker", ticker)
+        else:
+            del_q = del_q.is_("ticker", "null")
+        if isin:
+            del_q = del_q.eq("isin", isin)
+        else:
+            del_q = del_q.is_("isin", "null")
+        del_q.execute()
+
+        # Insertar precio nuevo
+        sb.table("holding_prices").insert({
             "ticker": ticker,
             "isin": isin,
             "date": TODAY,
@@ -149,7 +162,7 @@ def main():
             "currency": currency,
             "close_eur": float(close_eur) if close_eur else None,
             "source": "yahoo"
-        }, on_conflict="ticker,isin,date").execute()
+        }).execute()
 
         eur_str = f"{float(close_eur):.2f}EUR" if close_eur else "-"
         print(f"  OK {label:8s}  {float(close_orig):>10.2f} {currency} -> {eur_str}")
