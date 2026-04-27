@@ -5,14 +5,10 @@ Antes de tocar las vistas/tablas referenciadas, leer este archivo.
 
 ---
 
-## P-001 · Roboadvisor sin cotización pública
-- **Holding:** "MyInvestor Robot Advisor (perfil agregado)"
-- **Cuenta:** MyInvestor común
-- **ID:** d4a7df32-4259-4be0-a077-3f214ca5bc5a
-- **Problema:** no tiene ticker ni ISIN porque es una cesta dinámica gestionada por MyInvestor.
-- **Solución activa:** valor real cargado en `holdings.avg_price_eur`. La vista `holdings_valued` (migración 15) hace fallback a `avg_price_eur` cuando no hay precio en `holding_prices`.
-- **Mantenimiento:** actualizar `avg_price_eur` mensualmente con el valor del extracto MyInvestor.
-- **Riesgo si se toca:** cualquier cambio en `holdings_valued` que elimine el tercer `WHEN` del CASE → este holding pasa a valer NULL y desaparecen ~14k€ del patrimonio.
+## P-001 · Roboadvisor sin cotización pública — ✅ RESUELTO (2026-04-27, migración 20)
+- **Solución aplicada:** registro migrado desde `holdings.avg_price_eur` a tabla dedicada `manual_holdings`. La vista `account_balances_full` suma `manual_holdings.current_value_eur` directamente.
+- **Fallback eliminado:** `holdings_valued` ya no tiene el tercer `WHEN avg_price_eur` en el CASE. Si se cuela un holding sin precio, devuelve NULL (correcto).
+- **Mantenimiento:** actualizar `manual_holdings.current_value_eur` mensualmente con el valor del extracto MyInvestor vía UPDATE directo en Supabase.
 
 ## P-002 · Tarjetas de crédito invierten signo
 - **Tabla afectada:** vista `account_balances_full`
@@ -46,6 +42,7 @@ Antes de tocar las vistas/tablas referenciadas, leer este archivo.
 ## P-008 · holdings_valued hace match por ticker primero, ISIN como fallback
 - **Vista afectada:** `holdings_valued`
 - **Lógica (migración 19):** si el holding tiene ticker, busca precio en `holding_prices` por ticker (ignorando ISIN). Solo si el holding no tiene ticker busca por ISIN. Esto permite que BRK.B de DeGiro y BRK.B de IBKR compartan el mismo precio aunque tengan ISINs distintos o NULL.
+- **Nota (migración 20):** el fallback a `avg_price_eur` fue eliminado. `holdings_valued` ya no tiene el tercer `WHEN` del CASE. Activos sin cotización deben estar en `manual_holdings`, no en `holdings`.
 - **Mantenimiento:** `holding_prices` debe tener exactamente 1 fila por (ticker, date) para tickers conocidos. Garantizado por migración 18 + patrón DELETE+INSERT en `update_prices.py`.
 - **Riesgo si se toca:** si `holdings_valued` vuelve al match por `(ticker, isin)` exacto, holdings con ISIN no encontrarán el precio (almacenado sin ISIN) y `current_value_eur` será NULL.
 
