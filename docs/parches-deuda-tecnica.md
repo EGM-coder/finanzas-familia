@@ -39,6 +39,13 @@ Antes de tocar las vistas/tablas referenciadas, leer este archivo.
 - **Workaround actual:** el script `update_prices.py` borra antes de insertar (esto se aplicó en algún momento, verificar antes de tocar).
 - **Riesgo:** ejecutar dos veces el script en el mismo día con datos diferentes → la vista coge el último insertado (puede no ser el correcto).
 
+## P-006 · Precio NDX1 en holding_prices sin holding asociado
+- **Tabla:** `holding_prices`
+- **Registro:** ticker = 'NDX1.DE', isin = NULL (migración 16).
+- **Razón:** `stock_options_valued` necesita el precio de NDX1 vía `holding_prices`, pero las stock options no son holdings. Se usa la misma tabla como fuente de precios genérica.
+- **Mantenimiento:** añadir NDX1.DE al `TICKER_MAP` de `update_prices.py` para que se actualice automáticamente con el resto de precios.
+- **Riesgo si se toca:** si se limpia `holding_prices` filtrando por `account_id IS NOT NULL` o similar, este precio desaparece y `stock_options_valued` devuelve NULL en `current_price_eur`.
+
 ---
 
 ## Antes de cualquier migración nueva

@@ -33,6 +33,7 @@ TICKER_MAP = {
     "DXCM": "DXCM",
     "MSFT": "MSFT",
     "RIVN": "RIVN",
+    "NDX1.DE": "NDX1.DE",
 }
 
 ISIN_MAP = {
