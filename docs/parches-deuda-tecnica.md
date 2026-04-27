@@ -46,6 +46,12 @@ Antes de tocar las vistas/tablas referenciadas, leer este archivo.
 - **Mantenimiento:** añadir NDX1.DE al `TICKER_MAP` de `update_prices.py` para que se actualice automáticamente con el resto de precios.
 - **Riesgo si se toca:** si se limpia `holding_prices` filtrando por `account_id IS NOT NULL` o similar, este precio desaparece y `stock_options_valued` devuelve NULL en `current_price_eur`.
 
+## P-007 · account_balances_full debe exponer is_active y sort_order
+- **Tabla afectada:** vista `account_balances_full`
+- **Razón:** la vista la consume `app/cuentas/page.tsx` con `.eq('is_active', true).order('sort_order')`. Si se elimina cualquiera de las dos columnas en una migración futura, PostgREST no falla pero devuelve 0 filas y el listado por clases aparece a 0,00 €.
+- **Mantenimiento:** cualquier migración que recree `account_balances_full` debe seguir incluyendo `a.is_active` y `a.sort_order` en el SELECT.
+- **Riesgo si se toca:** listado de clases vacío silenciosamente; PatrimonioNetoCard sigue mostrando el total correcto porque lee de `patrimonio_neto` directamente.
+
 ---
 
 ## Antes de cualquier migración nueva
