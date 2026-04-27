@@ -43,6 +43,12 @@ Antes de tocar las vistas/tablas referenciadas, leer este archivo.
 - **Mantenimiento:** `get_unique_tickers()` ya incluye los tickers de `stock_options`, por lo que NDX1.DE se actualiza automáticamente cada vez que corre `update_prices.py`. El precio manual insertado en migración 16 fue machacado en la primera ejecución posterior del script.
 - **Riesgo si se toca:** si se limpia `holding_prices` filtrando por `account_id IS NOT NULL` o similar, este precio desaparece y `stock_options_valued` devuelve NULL en `current_price_eur`.
 
+## P-008 · holdings_valued hace match por ticker primero, ISIN como fallback
+- **Vista afectada:** `holdings_valued`
+- **Lógica (migración 19):** si el holding tiene ticker, busca precio en `holding_prices` por ticker (ignorando ISIN). Solo si el holding no tiene ticker busca por ISIN. Esto permite que BRK.B de DeGiro y BRK.B de IBKR compartan el mismo precio aunque tengan ISINs distintos o NULL.
+- **Mantenimiento:** `holding_prices` debe tener exactamente 1 fila por (ticker, date) para tickers conocidos. Garantizado por migración 18 + patrón DELETE+INSERT en `update_prices.py`.
+- **Riesgo si se toca:** si `holdings_valued` vuelve al match por `(ticker, isin)` exacto, holdings con ISIN no encontrarán el precio (almacenado sin ISIN) y `current_value_eur` será NULL.
+
 ## P-007 · account_balances_full debe exponer is_active y sort_order
 - **Tabla afectada:** vista `account_balances_full`
 - **Razón:** la vista la consume `app/cuentas/page.tsx` con `.eq('is_active', true).order('sort_order')`. Si se elimina cualquiera de las dos columnas en una migración futura, PostgREST no falla pero devuelve 0 filas y el listado por clases aparece a 0,00 €.

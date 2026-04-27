@@ -47,25 +47,25 @@ def get_unique_tickers():
     seen = set()
     out = []
 
-    for h in res_h.data:
-        key = (h["ticker"], h["isin"])
-        if key not in seen:
-            seen.add(key)
-            out.append({
-                "ticker": h["ticker"],
-                "isin": h["isin"],
-                "currency": h["original_currency"]
-            })
+    def add(ticker, isin, currency):
+        # Clave: ticker si existe, si no ISIN. Precio es del activo, no del ISIN del broker.
+        if ticker:
+            key = ("T", ticker)
+            stored_isin = None
+        elif isin:
+            key = ("I", isin)
+            stored_isin = isin
+        else:
+            return  # sin ticker ni ISIN, no se puede buscar precio
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({"ticker": ticker, "isin": stored_isin, "currency": currency})
 
+    for h in res_h.data:
+        add(h["ticker"], h["isin"], h["original_currency"])
     for so in res_so.data:
-        key = (so["ticker"], None)
-        if key not in seen:
-            seen.add(key)
-            out.append({
-                "ticker": so["ticker"],
-                "isin": None,
-                "currency": so["currency"]
-            })
+        add(so["ticker"], None, so["currency"])
 
     return out
 
