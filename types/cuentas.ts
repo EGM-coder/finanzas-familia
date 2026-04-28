@@ -78,9 +78,27 @@ export interface StockOptionValued {
   exercisable_now: boolean
 }
 
+export interface SnapshotDeltaRow {
+  snapshot_date: string
+  patrimonio_neto_actual: number
+  patrimonio_neto_si_firmara_hoy: number
+  liquidos_y_holdings: number
+  stock_options_intrinsic: number
+  ref_date: string | null
+  delta_neto_actual: number | null
+  delta_neto_si_firmara: number | null
+  delta_liquidos: number | null
+  delta_stock_options: number | null
+  delta_neto_actual_pct: number | null
+  delta_stock_options_pct: number | null
+  minutes_since_capture: number
+}
+
 export interface CuentasPageData {
   secciones: GrupoSection[]
   patrimonioDetalle: PatrimonioNetoRow
   stockOptions: StockOptionValued[]
+  snapshotDelta: SnapshotDeltaRow | null
+  patrimonioHistory: { date: string; value: number }[]
   userRole: 'eric' | 'ana'
 }

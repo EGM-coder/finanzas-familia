@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { StockOptionValued } from '@/types/cuentas'
+import DeltaIndicator from '@/app/components/DeltaIndicator'
 
 const C = {
   text:      '#2A2822',
@@ -69,9 +70,12 @@ function BadgeResolved({ so }: { so: StockOptionValued }) {
 interface Props {
   options: StockOptionValued[]
   visible: boolean
+  deltaAbs: number | null
+  deltaPct: number | null
+  refDate: string | null
 }
 
-export default function StockOptionsCard({ options, visible }: Props) {
+export default function StockOptionsCard({ options, visible, deltaAbs, deltaPct }: Props) {
   const [open, setOpen] = useState(false)
 
   const totalIntrinsic = options.reduce((s, o) => s + (o.intrinsic_total ?? 0), 0)
@@ -96,6 +100,11 @@ export default function StockOptionsCard({ options, visible }: Props) {
         <div style={{ marginTop: 6, fontSize: 12, color: C.secondary }}>
           Valor intrínseco actual
         </div>
+        {visible && (
+          <div style={{ marginTop: 4 }}>
+            <DeltaIndicator delta={deltaAbs} pct={deltaPct} visible={visible} />
+          </div>
+        )}
         <div style={{ marginTop: 3, fontSize: 10, color: C.secondary, fontStyle: 'italic' }}>
           informativo, no suma al patrimonio neto
         </div>

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import type { CuentasPageData, GrupoSection, AccountWithBalance, Liability } from '@/types/cuentas'
 import PatrimonioNetoCard from './PatrimonioNetoCard'
 import StockOptionsCard from './StockOptionsCard'
+import SnapshotHealthBanner from '@/app/components/SnapshotHealthBanner'
 
 // ── Paleta ────────────────────────────────────────────────────
 const C = {
@@ -190,7 +191,7 @@ function SeccionCard({
 
 // ── Componente principal ──────────────────────────────────────
 export default function CuentasClient({ data }: { data: CuentasPageData }) {
-  const { secciones, patrimonioDetalle, stockOptions, userRole } = data
+  const { secciones, patrimonioDetalle, stockOptions, snapshotDelta, patrimonioHistory, userRole } = data
   const [visible, setVisible] = useState(true)
   const [open, setOpen] = useState<Set<string>>(new Set(['corriente']))
 
@@ -248,15 +249,29 @@ export default function CuentasClient({ data }: { data: CuentasPageData }) {
         </div>
       </div>
 
+      {/* Banner salud snapshot */}
+      <SnapshotHealthBanner snapshot={snapshotDelta} />
+
       {/* Patrimonio neto */}
       <div style={{ padding: '20px 0 0' }}>
-        <PatrimonioNetoCard data={patrimonioDetalle} visible={visible} />
+        <PatrimonioNetoCard
+          data={patrimonioDetalle}
+          visible={visible}
+          snapshotDelta={snapshotDelta}
+          history={patrimonioHistory}
+        />
       </div>
 
       {/* Stock options */}
       {stockOptions.length > 0 && (
         <div style={{ padding: '8px 0 0' }}>
-          <StockOptionsCard options={stockOptions} visible={visible} />
+          <StockOptionsCard
+            options={stockOptions}
+            visible={visible}
+            deltaAbs={snapshotDelta?.delta_stock_options ?? null}
+            deltaPct={snapshotDelta?.delta_stock_options_pct ?? null}
+            refDate={snapshotDelta?.ref_date ?? null}
+          />
         </div>
       )}
 

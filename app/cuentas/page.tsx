@@ -4,7 +4,9 @@ import CuentasClient from './CuentasClient'
 import type {
   Account, AccountWithBalance, Liability,
   GrupoSection, CuentasPageData, SectionId, PatrimonioNetoRow, StockOptionValued,
+  SnapshotDeltaRow,
 } from '@/types/cuentas'
+import { fetchPatrimonioHistory } from '@/app/hooks/usePatrimonioHistory'
 
 function classifyAccount(name: string): SectionId {
   const n = name.toLowerCase()
@@ -40,12 +42,16 @@ export default async function CuentasPage() {
     { data: profileData },
     { data: patrimonioRaw },
     { data: stockOptionsRaw },
+    { data: snapshotRaw },
+    patrimonioHistory,
   ] = await Promise.all([
     supabase.from('account_balances_full').select('*').eq('is_active', true).order('sort_order'),
     supabase.from('liabilities').select('*').eq('is_active', true),
     supabase.from('profiles').select('role').eq('user_id', user.id).single(),
     supabase.from('patrimonio_neto').select('*').single(),
     supabase.from('stock_options_valued').select('*'),
+    supabase.from('patrimonio_snapshot_with_delta').select('*').single(),
+    fetchPatrimonioHistory(supabase),
   ])
 
   const userRole = (profileData?.role ?? 'eric') as 'eric' | 'ana'
@@ -114,5 +120,23 @@ export default async function CuentasPage() {
     current_price_eur:  o.current_price_eur != null ? Number(o.current_price_eur) : null,
   }))
 
-  return <CuentasClient data={{ secciones, patrimonioDetalle, stockOptions, userRole }} />
+  const snapshotDelta: SnapshotDeltaRow | null = snapshotRaw
+    ? {
+        snapshot_date:                  snapshotRaw.snapshot_date,
+        patrimonio_neto_actual:         Number(snapshotRaw.patrimonio_neto_actual),
+        patrimonio_neto_si_firmara_hoy: Number(snapshotRaw.patrimonio_neto_si_firmara_hoy),
+        liquidos_y_holdings:            Number(snapshotRaw.liquidos_y_holdings),
+        stock_options_intrinsic:        Number(snapshotRaw.stock_options_intrinsic),
+        ref_date:                       snapshotRaw.ref_date ?? null,
+        delta_neto_actual:              snapshotRaw.delta_neto_actual != null ? Number(snapshotRaw.delta_neto_actual) : null,
+        delta_neto_si_firmara:          snapshotRaw.delta_neto_si_firmara != null ? Number(snapshotRaw.delta_neto_si_firmara) : null,
+        delta_liquidos:                 snapshotRaw.delta_liquidos != null ? Number(snapshotRaw.delta_liquidos) : null,
+        delta_stock_options:            snapshotRaw.delta_stock_options != null ? Number(snapshotRaw.delta_stock_options) : null,
+        delta_neto_actual_pct:          snapshotRaw.delta_neto_actual_pct != null ? Number(snapshotRaw.delta_neto_actual_pct) : null,
+        delta_stock_options_pct:        snapshotRaw.delta_stock_options_pct != null ? Number(snapshotRaw.delta_stock_options_pct) : null,
+        minutes_since_capture:          Number(snapshotRaw.minutes_since_capture),
+      }
+    : null
+
+  return <CuentasClient data={{ secciones, patrimonioDetalle, stockOptions, snapshotDelta, patrimonioHistory, userRole }} />
 }

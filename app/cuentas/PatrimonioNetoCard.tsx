@@ -1,7 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import type { PatrimonioNetoRow } from '@/types/cuentas'
+import type { PatrimonioNetoRow, SnapshotDeltaRow } from '@/types/cuentas'
+import type { HistoryPoint } from '@/app/hooks/usePatrimonioHistory'
+import DeltaIndicator from '@/app/components/DeltaIndicator'
+import Sparkline from '@/app/components/Sparkline'
 
 const C = {
   bg:        '#F7F4ED',
@@ -25,9 +28,11 @@ function fmtEur(n: number, visible: boolean, decimals = 0): string {
 interface Props {
   data: PatrimonioNetoRow
   visible: boolean
+  snapshotDelta?: SnapshotDeltaRow | null
+  history?: HistoryPoint[]
 }
 
-export default function PatrimonioNetoCard({ data, visible }: Props) {
+export default function PatrimonioNetoCard({ data, visible, snapshotDelta, history = [] }: Props) {
   const [open, setOpen] = useState(false)
 
   const {
@@ -66,6 +71,18 @@ export default function PatrimonioNetoCard({ data, visible }: Props) {
         }}>
           {fmtEur(patrimonio_neto_actual, visible)}
         </div>
+
+        {/* Delta 30d + sparkline */}
+        {snapshotDelta && (
+          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <DeltaIndicator
+              delta={snapshotDelta.delta_neto_actual}
+              pct={snapshotDelta.delta_neto_actual_pct}
+              visible={visible}
+            />
+            {visible && <Sparkline points={history} />}
+          </div>
+        )}
 
         {/* Si firmaras hoy */}
         <div style={{ marginTop: 8, fontSize: 12, color: C.secondary }}>
