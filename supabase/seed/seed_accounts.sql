@@ -3,7 +3,7 @@
 -- ============================================================================
 -- Saldos a 24/04/2026
 
--- 22 cuentas no-tarjeta
+-- 25 cuentas (21 no-tarjeta + 4 tarjetas)
 INSERT INTO public.accounts (name, institution, type, visibility, initial_balance, sort_order, is_active)
 VALUES
   -- PRIVADAS ERIC
