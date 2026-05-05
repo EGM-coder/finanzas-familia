@@ -8,8 +8,11 @@ Fixes vs v anterior:
   · UPSERT → DELETE + INSERT en holding_prices porque el índice único
     es sobre expresiones COALESCE() y PostgREST no acepta on_conflict
     sobre expresiones, solo columnas planas.
+  · P-010 (05-may-2026): get_unique_holdings incluye stock_options.
+    NDX1.DE añadido a TICKER_MAP. Lógica equivalente al commit 5f36e9b
+    perdido en incidente Copilot.
 
-Lectura de tickers desde la tabla holdings (is_active=TRUE).
+Lectura de tickers desde holdings (is_active=TRUE) + stock_options (todos).
 Escribe holding_prices y currency_rates con source='yahoo'.
 """
 
@@ -48,6 +51,7 @@ TICKER_MAP = {
     "DXCM":  "DXCM",
     "MSFT":  "MSFT",
     "RIVN":  "RIVN",
+    "NDX1":  "NDX1.DE",   # P-010: stock_options Nordex (XETRA)
 }
 
 ISIN_MAP = {
@@ -56,14 +60,16 @@ ISIN_MAP = {
 
 
 def get_unique_holdings():
+    seen = set()
+    out = []
+
+    # Fuente 1: holdings activos
     res = (
         sb.table("holdings")
         .select("ticker, isin, original_currency")
         .eq("is_active", True)
         .execute()
     )
-    seen = set()
-    out = []
     for h in res.data:
         key = (h["ticker"], h["isin"])
         if key not in seen:
@@ -73,6 +79,23 @@ def get_unique_holdings():
                 "isin": h["isin"],
                 "currency": h["original_currency"],
             })
+
+    # Fuente 2: stock_options (P-010)
+    # ticker = NDX1, isin = NULL, cotiza en EUR (XETRA via NDX1.DE)
+    res_so = sb.table("stock_options").select("ticker").execute()
+    for so in res_so.data:
+        ticker = so.get("ticker")
+        if not ticker:
+            continue
+        key = (ticker, None)
+        if key not in seen:
+            seen.add(key)
+            out.append({
+                "ticker": ticker,
+                "isin": None,
+                "currency": "EUR",
+            })
+
     return out
 
 
