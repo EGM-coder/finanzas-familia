@@ -1,7 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { connectBank } from './actions'
+import { connectBank, deleteBankConnection } from './actions'
+import { ConfirmDeleteButton } from './ConfirmDeleteButton'
 
 const ROMAN_MONTHS = ['i','ii','iii','iv','v','vi','vii','viii','ix','x','xi','xii']
 
@@ -177,15 +178,22 @@ export default async function ConexionesBancariasPage() {
                       </div>
                     </div>
 
-                    {needsReconnect && (
-                      <form action={connectBank}>
-                        <input type="hidden" name="aspsp_name"    value={c.aspsp_name} />
-                        <input type="hidden" name="aspsp_country" value={c.aspsp_country} />
-                        <button type="submit" className="btn btn-ghost" style={{ fontSize: 11, padding: '8px 14px' }}>
-                          Reconectar
-                        </button>
-                      </form>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {needsReconnect && (
+                        <form action={connectBank}>
+                          <input type="hidden" name="aspsp_name"    value={c.aspsp_name} />
+                          <input type="hidden" name="aspsp_country" value={c.aspsp_country} />
+                          <button type="submit" className="btn btn-ghost" style={{ fontSize: 11, padding: '8px 14px' }}>
+                            Reconectar
+                          </button>
+                        </form>
+                      )}
+                      <ConfirmDeleteButton
+                        connectionId={c.id}
+                        aspspName={c.aspsp_name}
+                        action={deleteBankConnection}
+                      />
+                    </div>
                   </div>
                 </div>
               )
