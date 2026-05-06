@@ -83,40 +83,53 @@ CREATE POLICY bank_account_links_update ON public.bank_account_links
   WITH CHECK (public.can_see_account(account_id));
 
 COMMENT ON TABLE public.bank_account_links IS
-  'Mapping entre cuentas lógicas EGMFin (accounts) y cuentas físicas de Enable Banking. '
-  'external_account_uid es el uid devuelto por Enable Banking en GET /api/v1/accounts. '
-  'Cuentas EGMFin sin PSD2 (Degiro, Trade Republic, etc.) no tendrán filas aquí.';
+  'Mapping entre cuentas lógicas EGMFin (accounts) y cuentas físicas Enable Banking. '
+  'external_account_uid es el uid devuelto por POST /sessions en accounts[]. '
+  'NO es el IBAN — el IBAN va en external_iban.';
 
 
--- ── 3. FK formal transactions.bank_connection_id ──────────────────────────
--- La columna ya existe (añadida en sección 0). Aquí el constraint formal.
+-- ── 3. FK transactions.bank_connection_id ─────────────────────────────────
 ALTER TABLE public.transactions
   ADD CONSTRAINT transactions_bank_connection_fk
   FOREIGN KEY (bank_connection_id)
   REFERENCES public.bank_connections(id)
   ON DELETE SET NULL;
 
--- Dedup PSD2: una tx por cuenta + external_id (ignora NULLs)
-CREATE UNIQUE INDEX IF NOT EXISTS transactions_external_unique_idx
-  ON public.transactions(account_id, external_id)
+
+-- ── 4. Idempotencia: índice UNIQUE parcial (account_id, external_id) ──────
+CREATE UNIQUE INDEX IF NOT EXISTS transactions_external_id_unique
+  ON public.transactions (account_id, external_id)
   WHERE external_id IS NOT NULL;
 
 COMMENT ON COLUMN public.transactions.external_id IS
-  'ID de transacción del provider PSD2 (Enable Banking). '
-  'NULL para transacciones manuales, csv, gmail_parse, xls_kutxabank.';
+  'entry_reference devuelto por Enable Banking en GET /accounts/{uid}/transactions. '
+  'Inmutable para identification_hash igual. Usar como clave de idempotencia.';
 
 COMMENT ON COLUMN public.transactions.bank_connection_id IS
-  'Consent que originó esta transacción. SET NULL si el consent se revoca.';
+  'Consent que originó esta transacción. NULL para transacciones no-PSD2. '
+  'SET NULL si el consent se revoca (la transacción sobrevive).';
 
 
--- ── 4. Verificación ───────────────────────────────────────────────────────
+-- ── 5. Verificación ───────────────────────────────────────────────────────
 SELECT tablename FROM pg_tables
 WHERE schemaname = 'public'
   AND tablename IN ('bank_connections','bank_account_links')
 ORDER BY tablename;
 -- → 2 filas
 
-SELECT conname, contype FROM pg_constraint
+SELECT column_name FROM information_schema.columns
+WHERE table_schema='public' AND table_name='transactions'
+  AND column_name IN ('bank_connection_id','external_id')
+ORDER BY column_name;
+-- → 2 filas
+
+SELECT conname FROM pg_constraint
 WHERE conrelid = 'public.transactions'::regclass
   AND conname = 'transactions_bank_connection_fk';
--- → 1 fila (tipo 'f' = foreign key)
+-- → 1 fila
+
+SELECT indexname FROM pg_indexes
+WHERE schemaname = 'public'
+  AND tablename = 'transactions'
+  AND indexname = 'transactions_external_id_unique';
+-- → 1 fila
