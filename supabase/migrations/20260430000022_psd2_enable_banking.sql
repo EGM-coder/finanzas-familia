@@ -1,32 +1,34 @@
 -- ============================================================================
--- Migración 22 — Canal PSD2 vía Enable Banking
--- 30-abr-2026 · Recovery + diseño limpio tras incidente Copilot
+-- Migración 22 — Canal PSD2 vía Enable Banking (modo Restricted Production)
+-- 06-may-2026 · Versión consolidada con fixes de validación contra flujo real
 --
--- Introduce:
---   · bank_connections: consent activo por institución + usuario
---   · bank_account_links: mapping cuenta EGMFin ↔ cuenta física del banco
---   · FK formal transactions.bank_connection_id → bank_connections
---
--- Decisiones de diseño:
---   · bank_connections NO almacena access_token en claro (→ raw_session jsonb)
---   · consent_session_id es el handle de Enable Banking, UNIQUE
---   · bank_account_links separa el mapping lógico del consent (N:M posible)
---   · transactions.bank_connection_id: ON DELETE SET NULL (tx no muere si
---     el consent expira/se revoca)
+-- App: EGMFin (55e3ec68-5176-4439-836c-d1c683ca80dd) · cuentas whitelisted:
+--   · Kutxabank ES17...
+--   · Banco Santander ES62...
+-- Coste: 0 € (modo restricted limita acceso a cuentas linkeadas en panel).
 -- ============================================================================
+
+-- ── 0. Columnas en transactions (no existían tras recovery) ────────────────
+ALTER TABLE public.transactions
+  ADD COLUMN IF NOT EXISTS bank_connection_id uuid,
+  ADD COLUMN IF NOT EXISTS external_id        text;
+
 
 -- ── 1. bank_connections ───────────────────────────────────────────────────
 CREATE TABLE public.bank_connections (
   id                   uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
   provider             text         NOT NULL CHECK (provider IN ('enable_banking')),
-  institution_id       text         NOT NULL,               -- ej. KUTXABANK_BASKBBBB
-  institution_name     text         NOT NULL,               -- ej. 'Kutxabank'
-  consent_session_id   text         NOT NULL UNIQUE,        -- session_id de Enable Banking
-  consent_valid_until  timestamptz  NOT NULL,               -- re-auth necesaria tras esta fecha
+  aspsp_name           text         NOT NULL,
+  aspsp_country        char(2)      NOT NULL,
+  aspsp_psu_type       text         NOT NULL DEFAULT 'personal'
+                                    CHECK (aspsp_psu_type IN ('personal','business')),
+  auth_state           uuid,
+  consent_session_id   text         UNIQUE,
+  consent_valid_until  timestamptz,
   user_id              uuid         NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
-  status               text         NOT NULL DEFAULT 'active'
-                                    CHECK (status IN ('active','expired','revoked')),
-  raw_session          jsonb,                               -- payload completo del provider
+  status               text         NOT NULL DEFAULT 'pending'
+                                    CHECK (status IN ('pending','active','expired','revoked')),
+  raw_session          jsonb,
   created_at           timestamptz  NOT NULL DEFAULT now(),
   updated_at           timestamptz  NOT NULL DEFAULT now()
 );
@@ -37,7 +39,6 @@ CREATE TRIGGER set_updated_at_bank_connections
   BEFORE UPDATE ON public.bank_connections
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- RLS: cada usuario ve y gestiona únicamente sus propios consents
 CREATE POLICY bank_connections_select ON public.bank_connections
   FOR SELECT USING (user_id = auth.uid());
 CREATE POLICY bank_connections_insert ON public.bank_connections
@@ -46,10 +47,10 @@ CREATE POLICY bank_connections_update ON public.bank_connections
   FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
 
 COMMENT ON TABLE public.bank_connections IS
-  'Consents PSD2 activos vía Enable Banking. '
-  'Una fila por institución conectada. '
-  'consent_valid_until marca cuándo Eric debe re-autenticarse (típicamente 180 días). '
-  'El access_token y refresh_token se almacenan en raw_session para no tenerlos en columnas en claro.';
+  'Consents PSD2 activos vía Enable Banking. Una fila por institución por user. '
+  'Flujo: INSERT con status=pending y auth_state generado → POST /auth → callback con code → '
+  'POST /sessions → UPDATE status=active, consent_session_id, consent_valid_until. '
+  'consent_valid_until típicamente +180d. Re-auth necesaria al expirar.';
 
 
 -- ── 2. bank_account_links ─────────────────────────────────────────────────
@@ -57,13 +58,13 @@ CREATE TABLE public.bank_account_links (
   id                    uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id            uuid         NOT NULL REFERENCES public.accounts(id) ON DELETE RESTRICT,
   bank_connection_id    uuid         NOT NULL REFERENCES public.bank_connections(id) ON DELETE CASCADE,
-  external_account_id   text         NOT NULL,              -- account_id del provider
+  external_account_uid  text         NOT NULL,
   external_iban         text,
   is_active             boolean      NOT NULL DEFAULT true,
   last_sync_at          timestamptz,
   created_at            timestamptz  NOT NULL DEFAULT now(),
   updated_at            timestamptz  NOT NULL DEFAULT now(),
-  UNIQUE (bank_connection_id, external_account_id)
+  UNIQUE (bank_connection_id, external_account_uid)
 );
 
 ALTER TABLE public.bank_account_links ENABLE ROW LEVEL SECURITY;
@@ -72,7 +73,6 @@ CREATE TRIGGER set_updated_at_bank_account_links
   BEFORE UPDATE ON public.bank_account_links
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- RLS: hereda visibilidad del account_id vinculado (usa helper existente)
 CREATE POLICY bank_account_links_select ON public.bank_account_links
   FOR SELECT USING (public.can_see_account(account_id));
 CREATE POLICY bank_account_links_insert ON public.bank_account_links
@@ -84,27 +84,29 @@ CREATE POLICY bank_account_links_update ON public.bank_account_links
 
 COMMENT ON TABLE public.bank_account_links IS
   'Mapping entre cuentas lógicas EGMFin (accounts) y cuentas físicas de Enable Banking. '
-  'Soporta cuentas EGMFin sin bank_connection (Trade Republic, Degiro, etc.) que nunca tendrán PSD2. '
-  'external_account_id es el id devuelto por Enable Banking en GET /api/v1/accounts.';
+  'external_account_uid es el uid devuelto por Enable Banking en GET /api/v1/accounts. '
+  'Cuentas EGMFin sin PSD2 (Degiro, Trade Republic, etc.) no tendrán filas aquí.';
 
 
 -- ── 3. FK formal transactions.bank_connection_id ──────────────────────────
--- La columna ya existe desde fase3_recrear_schema.sql sin FK.
--- Aquí añadimos el constraint formal ahora que bank_connections existe.
+-- La columna ya existe (añadida en sección 0). Aquí el constraint formal.
 ALTER TABLE public.transactions
   ADD CONSTRAINT transactions_bank_connection_fk
   FOREIGN KEY (bank_connection_id)
   REFERENCES public.bank_connections(id)
   ON DELETE SET NULL;
 
+-- Dedup PSD2: una tx por cuenta + external_id (ignora NULLs)
+CREATE UNIQUE INDEX IF NOT EXISTS transactions_external_unique_idx
+  ON public.transactions(account_id, external_id)
+  WHERE external_id IS NOT NULL;
+
 COMMENT ON COLUMN public.transactions.external_id IS
   'ID de transacción del provider PSD2 (Enable Banking). '
-  'Combinado con account_id da unicidad — índice UNIQUE parcial en fase3. '
   'NULL para transacciones manuales, csv, gmail_parse, xls_kutxabank.';
 
 COMMENT ON COLUMN public.transactions.bank_connection_id IS
-  'Consent que originó esta transacción. '
-  'NULL para transacciones no-PSD2. SET NULL si el consent se revoca.';
+  'Consent que originó esta transacción. SET NULL si el consent se revoca.';
 
 
 -- ── 4. Verificación ───────────────────────────────────────────────────────
