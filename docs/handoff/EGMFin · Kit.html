@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>EGMFin · Kit de pantallas</title>
+  <meta name="viewport" content="width=1400" />
+  <style>
+    html,body { margin:0; padding:0; background:#f0eee9; font-family: -apple-system, system-ui, sans-serif; }
+  </style>
+  <link rel="stylesheet" href="egm.css" />
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="data.jsx"></script>
+  <script type="text/babel" src="ios-frame.jsx"></script>
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="egm-shell.jsx"></script>
+  <script type="text/babel" src="egm-app.jsx"></script>
+  <script type="text/babel" src="egm-web.jsx"></script>
+  <script type="text/babel" src="egm-control.jsx"></script>
+
+  <script type="text/babel">
+    function Phone({ children, dark }) {
+      return (
+        <div style={{ display:'flex', justifyContent:'center', alignItems:'center', height:'100%' }}>
+          <IOSDevice width={360} height={780} dark={dark}>
+            <div style={{ width:'100%', height:'100%' }}>{children}</div>
+          </IOSDevice>
+        </div>
+      );
+    }
+    const phone = (Comp, dark) => () => <Phone dark={dark}><Comp dark={dark} /></Phone>;
+    const web   = (Comp, dark) => () => <Comp dark={dark} />;
+
+    function Root() {
+      return (
+        <DesignCanvas>
+          {/* ───── APP · LIGHT ───── */}
+          <DCSection id="app-light" title="App · modo claro" subtitle="iPhone · 360×780 · paleta original (blanco/gris/negro · verde/rojo solo señales)">
+            <DCArtboard id="al-on" label="Onboarding"     width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppOnboarding, false)()}</DCArtboard>
+            <DCArtboard id="al-ho" label="Inicio"         width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppHome,       false)()}</DCArtboard>
+            <DCArtboard id="al-ma" label="Maristas"       width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppMaristas,   false)()}</DCArtboard>
+            <DCArtboard id="al-si" label="Horizonte"      width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppSimulator,  false)()}</DCArtboard>
+            <DCArtboard id="al-tl" label="Línea de vida"  width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppTimeline,   false)()}</DCArtboard>
+            <DCArtboard id="al-co" label="Control · microgasto"  width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppControl,    false)()}</DCArtboard>
+            <DCArtboard id="al-ai" label="Asesor IA"      width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppAdvisor,    false)()}</DCArtboard>
+          </DCSection>
+
+          {/* ───── APP · DARK ───── */}
+          <DCSection id="app-dark" title="App · modo oscuro" subtitle="Mismo sistema · variante oscura para uso nocturno y para el dossier de inversores">
+            <DCArtboard id="ad-on" label="Onboarding"     width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppOnboarding, true)()}</DCArtboard>
+            <DCArtboard id="ad-ho" label="Inicio"         width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppHome,       true)()}</DCArtboard>
+            <DCArtboard id="ad-ma" label="Maristas"       width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppMaristas,   true)()}</DCArtboard>
+            <DCArtboard id="ad-si" label="Horizonte"      width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppSimulator,  true)()}</DCArtboard>
+            <DCArtboard id="ad-tl" label="Línea de vida"  width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppTimeline,   true)()}</DCArtboard>
+            <DCArtboard id="ad-co" label="Control · microgasto"  width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppControl,    true)()}</DCArtboard>
+            <DCArtboard id="ad-ai" label="Asesor IA"      width={420} height={840} style={{ background:'transparent' }}>{phone(window.AppAdvisor,    true)()}</DCArtboard>
+          </DCSection>
+
+          {/* ───── WEB · LIGHT ───── */}
+          <DCSection id="web-light" title="Web · modo claro" subtitle="Dashboard escritorio · landing pública + navegación interna del sistema">
+            <DCArtboard id="wl-la" label="Landing"        width={1280} height={820}>{web(window.WebLanding,   false)()}</DCArtboard>
+            <DCArtboard id="wl-ho" label="Inicio"         width={1280} height={820}>{web(window.WebHome,      false)()}</DCArtboard>
+            <DCArtboard id="wl-ma" label="Maristas"       width={1280} height={820}>{web(window.WebMaristas,  false)()}</DCArtboard>
+            <DCArtboard id="wl-si" label="Horizonte"      width={1280} height={820}>{web(window.WebSimulator, false)()}</DCArtboard>
+            <DCArtboard id="wl-tl" label="Línea de vida"  width={1280} height={860}>{web(window.WebTimeline,  false)()}</DCArtboard>
+            <DCArtboard id="wl-co" label="Control · microgasto"  width={1280} height={820}>{web(window.WebControl,   false)()}</DCArtboard>
+            <DCArtboard id="wl-ai" label="Asesor IA"      width={1280} height={820}>{web(window.WebAdvisor,   false)()}</DCArtboard>
+          </DCSection>
+
+          {/* ───── WEB · DARK ───── */}
+          <DCSection id="web-dark" title="Web · modo oscuro" subtitle="Misma arquitectura · variante oscura">
+            <DCArtboard id="wd-la" label="Landing"        width={1280} height={820}>{web(window.WebLanding,   true)()}</DCArtboard>
+            <DCArtboard id="wd-ho" label="Inicio"         width={1280} height={820}>{web(window.WebHome,      true)()}</DCArtboard>
+            <DCArtboard id="wd-ma" label="Maristas"       width={1280} height={820}>{web(window.WebMaristas,  true)()}</DCArtboard>
+            <DCArtboard id="wd-si" label="Horizonte"      width={1280} height={820}>{web(window.WebSimulator, true)()}</DCArtboard>
+            <DCArtboard id="wd-tl" label="Línea de vida"  width={1280} height={860}>{web(window.WebTimeline,  true)()}</DCArtboard>
+            <DCArtboard id="wd-co" label="Control · microgasto"  width={1280} height={820}>{web(window.WebControl,   true)()}</DCArtboard>
+            <DCArtboard id="wd-ai" label="Asesor IA"      width={1280} height={820}>{web(window.WebAdvisor,   true)()}</DCArtboard>
+          </DCSection>
+
+          <DCPostIt top={20} left={60} rotate={-2} width={240}>
+            <strong>Kit de pantallas EGMFin.</strong> 6 vistas × app/web × claro/oscuro = 24 piezas. Misma fuente de datos, misma tipografía, misma rítmica. Sobre este kit montaremos los dos dossiers (inversores + usuarios).
+          </DCPostIt>
+        </DesignCanvas>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+  </script>
+</body>
+</html>
