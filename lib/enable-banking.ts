@@ -49,8 +49,8 @@ export async function startConsent({
   aspspCountry: string
   state: string
 }): Promise<ConsentResponse> {
-  const validUntil = new Date()
-  validUntil.setDate(validUntil.getDate() + 180)
+  // Enable Banking ASPSP max: 15552000s (180d). Margen 60s para evitar drift de reloj.
+  const validUntil = new Date(Date.now() + (15552000 - 60) * 1000)
 
   return ebFetch<ConsentResponse>('/auth', {
     method: 'POST',
