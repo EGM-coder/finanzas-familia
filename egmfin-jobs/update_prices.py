@@ -51,7 +51,7 @@ TICKER_MAP = {
     "DXCM":  "DXCM",
     "MSFT":  "MSFT",
     "RIVN":  "RIVN",
-    "NDX1":  "NDX1.DE",   # P-010: stock_options Nordex (XETRA)
+    "NDX1.DE": "NDX1.DE",  # P-010: stock_options Nordex (XETRA)
 }
 
 ISIN_MAP = {
