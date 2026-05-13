@@ -4,17 +4,17 @@ sync_psd2.py — Sincronización de transacciones PSD2 desde Enable Banking a Su
 
 Cron: Diario tras update_prices (~UTC 22:35)
 
-Flujo:
-1. Lee bank_account_links activos + bank_connections activas
-2. Para cada cuenta: GET /accounts/{uid}/transactions desde Enable Banking
-3. Mapea + upsert en tabla transactions (source='psd2', external_id idempotente)
-4. Update last_sync_at en bank_account_links
+P-011 fix (12-may-2026):
+- external_id robusto: usa entry_reference/transaction_id nativos con prefijo (er_, tid_)
+- Fallback SHA-256 con muchos campos (incluyendo CDI, contraparte, IBAN, remittance completo)
+- Counter intra-batch para duplicados verdaderos (seq1, seq2, ...)
 
 Modo DRY_RUN: exporta DRY_RUN=1 para ver qué insertaría sin escribir a DB.
 """
 
 import os
 import json
+import hashlib
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -36,15 +36,12 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 DRY_RUN = os.getenv('DRY_RUN', '0') == '1'
 
 EB_BASE_URL = 'https://api.enablebanking.com'
-
-# Cuántos días atrás traer (en el primer run, 90 días)
 DAYS_BACK = int(os.getenv('DAYS_BACK', '90'))
 
 sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
 def sign_jwt() -> str:
-    """JWT RS256 app-level (no per-session)."""
     now = datetime.now(timezone.utc)
     payload = {
         'iss': 'enablebanking.com',
@@ -67,10 +64,8 @@ def eb_get(path: str, params: Optional[dict] = None) -> dict:
 
 
 def fetch_account_transactions(account_uid: str, days_back: int = 90) -> list:
-    """Lista de transacciones (puede paginar)."""
     date_from = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime('%Y-%m-%d')
     params = {'date_from': date_from}
-
     all_txns = []
     continuation_key = None
     page = 0
@@ -91,35 +86,65 @@ def fetch_account_transactions(account_uid: str, days_back: int = 90) -> list:
     return all_txns
 
 
-def map_txn(txn: dict, account_id: str, bank_connection_id: str) -> dict:
+def make_external_id(txn: dict, account_uid: str, seen_hashes: dict) -> str:
+    """
+    P-011 fix: external_id robusto.
+    - IDs nativos EB con prefijo (er_, tid_) → idempotente entre runs
+    - Fallback SHA-256 con muchos campos
+    - Counter intra-batch (_seq1, _seq2) para duplicados verdaderos
+    """
+    # 1. IDs nativos del banco
+    if txn.get('entry_reference'):
+        return f"er_{txn['entry_reference']}"
+    if txn.get('transaction_id'):
+        return f"tid_{txn['transaction_id']}"
+
+    # 2. Hash SHA-256 robusto
+    amt = txn.get('transaction_amount', {}) or {}
+    creditor = (txn.get('creditor') or {}).get('name', '') or ''
+    debtor = (txn.get('debtor') or {}).get('name', '') or ''
+    cred_iban = (txn.get('creditor_account') or {}).get('iban', '') or ''
+    deb_iban = (txn.get('debtor_account') or {}).get('iban', '') or ''
+    remit = '|'.join(txn.get('remittance_information') or [])
+
+    base = '|'.join([
+        account_uid,
+        str(txn.get('booking_date') or ''),
+        str(txn.get('value_date') or ''),
+        str(txn.get('credit_debit_indicator') or ''),
+        str(amt.get('amount') or ''),
+        creditor, debtor,
+        cred_iban, deb_iban,
+        remit,
+        str(txn.get('reference_number') or ''),
+    ])
+    base_hash = hashlib.sha256(base.encode()).hexdigest()[:32]
+
+    # 3. Counter intra-batch
+    seen_hashes[base_hash] = seen_hashes.get(base_hash, 0) + 1
+    if seen_hashes[base_hash] > 1:
+        return f"h_{base_hash}_seq{seen_hashes[base_hash]}"
+    return f"h_{base_hash}"
+
+
+def map_txn(txn: dict, account_id: str, bank_connection_id: str,
+            account_uid: str, seen_hashes: dict) -> dict:
     """Mapea txn de Enable Banking a estructura `transactions` de Supabase."""
-    amt_obj = txn.get('transaction_amount', {})
+    amt_obj = txn.get('transaction_amount', {}) or {}
     raw_amount = float(amt_obj.get('amount', 0))
-    
-    # Determinar signo (Enable Banking usa credit_debit_indicator)
-    cdi = txn.get('credit_debit_indicator', 'CRDT')  # CRDT = ingreso, DBIT = gasto
+
+    cdi = txn.get('credit_debit_indicator', 'CRDT')
+    amount = -abs(raw_amount) if cdi == 'DBIT' else abs(raw_amount)
+
+    remittance = txn.get('remittance_information') or []
+    description = '; '.join(remittance) if remittance else (txn.get('reference_number') or 'N/A')
+
     if cdi == 'DBIT':
-        amount = -abs(raw_amount)
+        counterparty = (txn.get('creditor') or {}).get('name', '') or ''
     else:
-        amount = abs(raw_amount)
+        counterparty = (txn.get('debtor') or {}).get('name', '') or ''
 
-    # Descripción
-    remittance = txn.get('remittance_information', [])
-    description = '; '.join(remittance) if remittance else txn.get('reference_number', 'N/A')
-
-    # Counterparty
-    if cdi == 'DBIT':
-        counterparty = (txn.get('creditor', {}) or {}).get('name', '')
-    else:
-        counterparty = (txn.get('debtor', {}) or {}).get('name', '')
-
-    # ID único para idempotencia
-    entry_ref = txn.get('entry_reference') or txn.get('transaction_id') or txn.get('reference_number', '')
-    if not entry_ref:
-        # Fallback: hash de campos clave
-        import hashlib
-        key = f"{txn.get('booking_date')}_{raw_amount}_{description}"
-        entry_ref = hashlib.md5(key.encode()).hexdigest()
+    ext_id = make_external_id(txn, account_uid, seen_hashes)
 
     return {
         'account_id': account_id,
@@ -131,10 +156,9 @@ def map_txn(txn: dict, account_id: str, bank_connection_id: str) -> dict:
         'raw_concept': json.dumps(txn)[:2000],
         'titular': 'eric',
         'source': 'psd2',
-        'source_id': entry_ref,
-        'external_id': entry_ref,
+        'source_id': ext_id,
+        'external_id': ext_id,
         'counterparty': counterparty[:200] if counterparty else None,
-        # nature: NULL (categorización manual posterior)
     }
 
 
@@ -142,12 +166,11 @@ def sync_psd2():
     mode = '🔬 DRY-RUN' if DRY_RUN else '🔄 LIVE'
     logger.info(f'{mode} Iniciando sincronización PSD2...')
 
-    # Fetch cuentas linkeadas activas + conexiones activas
     response = sb.table('bank_account_links').select(
         'id, account_id, bank_connection_id, external_account_uid, external_iban, '
         'bank_connections(id, aspsp_name, status, consent_valid_until)'
     ).eq('is_active', True).execute()
-    
+
     links = response.data
     logger.info(f'✅ {len(links)} cuentas linkeadas activas')
 
@@ -157,7 +180,7 @@ def sync_psd2():
 
     total_txns = 0
     total_inserted = 0
-    
+
     for link in links:
         conn = link['bank_connections']
         if conn['status'] != 'active':
@@ -180,18 +203,28 @@ def sync_psd2():
         logger.info(f'  📋 {len(txns)} txns descargadas en {DAYS_BACK} días')
         total_txns += len(txns)
 
+        # P-011: seen_hashes por cuenta (no global) → counter por batch
+        seen_hashes = {}
+        records = [map_txn(t, account_id, bc_id, uid, seen_hashes) for t in txns]
+
+        # Reportar colisiones detectadas en este batch
+        collisions = sum(1 for v in seen_hashes.values() if v > 1)
+        if collisions:
+            logger.info(f'  🔍 {collisions} colisiones de hash resueltas con sufijo _seqN')
+
+        # Verificar unicidad
+        ext_ids = [r['external_id'] for r in records]
+        if len(set(ext_ids)) != len(ext_ids):
+            logger.error(f'  ❌ DUPLICADOS DETECTADOS tras fix: {len(ext_ids) - len(set(ext_ids))}')
+            continue
+
         if DRY_RUN:
-            # Mostrar primeras 3 como preview
-            for txn in txns[:3]:
-                mapped = map_txn(txn, account_id, bc_id)
-                logger.info(f"    🔬 PREVIEW: {mapped['date']} | {mapped['amount']:8.2f} EUR | {mapped['description'][:60]}")
-            logger.info(f'  🔬 DRY-RUN: NO se insertan (verían {len(txns)} registros)')
+            for rec in records[:3]:
+                logger.info(f"    🔬 PREVIEW: {rec['date']} | {rec['amount']:8.2f} EUR | {rec['external_id'][:30]}... | {rec['description'][:50]}")
+            logger.info(f'  🔬 DRY-RUN: NO se insertan (verían {len(records)} registros, todos únicos)')
             continue
 
         # LIVE: insert real
-        records = [map_txn(t, account_id, bc_id) for t in txns]
-        
-        # Idempotencia: DELETE+INSERT por external_id (PostgREST + COALESCE workaround)
         inserted_here = 0
         for rec in records:
             try:
@@ -200,11 +233,10 @@ def sync_psd2():
                 inserted_here += 1
             except Exception as e:
                 logger.warning(f"    ⚠️  Error en {rec['external_id']}: {e}")
-        
+
         total_inserted += inserted_here
         logger.info(f'  ✅ {inserted_here} txns insertadas')
 
-        # last_sync_at
         sb.table('bank_account_links').update({
             'last_sync_at': datetime.now(timezone.utc).isoformat()
         }).eq('id', link['id']).execute()
