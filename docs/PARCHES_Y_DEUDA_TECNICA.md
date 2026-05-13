@@ -131,6 +131,33 @@ Holdings remapeados determinísticamente por nombre de cuenta (19 filas, 7 grupo
 
 ---
 
+## P-012 · 12-may-2026 · **RESUELTO** (commit 2e6f4e2)
+**Colisiones de external_id en sync_psd2 causan pérdida silenciosa de txns**
+
+Sync PSD2 descargaba 164 txns desde Enable Banking pero solo persistía 162.
+
+**Causa raíz:**
+- Hash MD5 fallback en `sync_psd2.py` usaba solo 3 campos: `booking_date + amount(absoluto) + description`
+- 21 txns sin `entry_reference` nativo (19 Kutxabank, 2 Santander): BIZUM sin concepto, COMISION, CUOTA PTMO, ANUL., TARJ.CRDTO
+- Hash usaba `amount` sin signo → DBIT 3.25€ y CRDT 3.25€ colisionaban
+- Hash sin counter intra-batch → 2x ANUL. TRANSF. idénticas (4-mar, 870€) colisionaban
+
+**Casos concretos perdidos:**
+- 30-abr Kutxabank: `COMISION CAJERO SERVIRED 3.25€` (DBIT y CRDT) → 1 perdida
+- 4-mar Kutxabank: 2x `ANUL. TRANSF. 0049 COMUN extra 870€` idénticas → 1 perdida
+
+**Fix aplicado:**
+- IDs nativos EB con prefijo: `er_<entry_reference>`, `tid_<transaction_id>`
+- Fallback SHA-256 con 11 campos: incluyendo `credit_debit_indicator`, contraparte, IBAN origen/destino, remittance completo
+- Counter intra-batch (`_seq1`, `_seq2`) para duplicados verdaderos
+
+**Verificación:** sync 12-may-2026 = 164/164 (vs 162/164 anterior con bug).
+
+**Comportamiento PSD2 documentado:**
+Las anulaciones (`ANUL.`, devoluciones cajero) son válidas: PSD2 muestra la verdad contable del banco. Reportes futuros pueden usar `is_reimbursable` / `reimbursed_at` (ya en schema) para neteado automático.
+
+---
+
 ## Deuda técnica pendiente
 
 | ID | Descripción | Prioridad |
