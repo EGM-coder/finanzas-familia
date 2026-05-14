@@ -9,7 +9,14 @@ P-011 fix (12-may-2026):
 - Fallback SHA-256 con muchos campos (incluyendo CDI, contraparte, IBAN, remittance completo)
 - Counter intra-batch para duplicados verdaderos (seq1, seq2, ...)
 
-Modo DRY_RUN: exporta DRY_RUN=1 para ver qué insertaría sin escribir a DB.
+P-013 fix (13-may-2026):
+- Sustituye DELETE+INSERT por UPDATE selectivo + INSERT
+- Preserva campos de categorización manual: titular, account_id, nature, category_id,
+  project_id, paid_by_user_id, is_reimbursable, reimbursed_at
+- Batch SELECT previo por external_id para clasificar INSERT / UPDATE / sin cambios
+- Logging: "X insertadas, Y actualizadas, Z sin cambios" por banco y en total
+
+Modo DRY_RUN: exporta DRY_RUN=1 para ver qué insertaría/actualizaría sin escribir a DB.
 """
 
 import os
@@ -37,6 +44,14 @@ DRY_RUN = os.getenv('DRY_RUN', '0') == '1'
 
 EB_BASE_URL = 'https://api.enablebanking.com'
 DAYS_BACK = int(os.getenv('DAYS_BACK', '90'))
+
+# Campos del banco que el sync puede actualizar.
+# NUNCA se tocan: titular, account_id, nature, category_id, project_id,
+#                 paid_by_user_id, is_reimbursable, reimbursed_at
+BANK_FIELDS = (
+    'amount', 'date', 'description', 'raw_concept', 'currency',
+    'bank_connection_id', 'counterparty', 'source_id',
+)
 
 sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
@@ -93,13 +108,11 @@ def make_external_id(txn: dict, account_uid: str, seen_hashes: dict) -> str:
     - Fallback SHA-256 con muchos campos
     - Counter intra-batch (_seq1, _seq2) para duplicados verdaderos
     """
-    # 1. IDs nativos del banco
     if txn.get('entry_reference'):
         return f"er_{txn['entry_reference']}"
     if txn.get('transaction_id'):
         return f"tid_{txn['transaction_id']}"
 
-    # 2. Hash SHA-256 robusto
     amt = txn.get('transaction_amount', {}) or {}
     creditor = (txn.get('creditor') or {}).get('name', '') or ''
     debtor = (txn.get('debtor') or {}).get('name', '') or ''
@@ -120,7 +133,6 @@ def make_external_id(txn: dict, account_uid: str, seen_hashes: dict) -> str:
     ])
     base_hash = hashlib.sha256(base.encode()).hexdigest()[:32]
 
-    # 3. Counter intra-batch
     seen_hashes[base_hash] = seen_hashes.get(base_hash, 0) + 1
     if seen_hashes[base_hash] > 1:
         return f"h_{base_hash}_seq{seen_hashes[base_hash]}"
@@ -162,6 +174,21 @@ def map_txn(txn: dict, account_id: str, bank_connection_id: str,
     }
 
 
+def _bank_fields_changed(existing: dict, new_rec: dict) -> bool:
+    """True si algún campo de banco difiere entre la fila existente y el nuevo registro."""
+    for field in BANK_FIELDS:
+        ex_val = existing.get(field)
+        new_val = new_rec.get(field)
+        if field == 'amount':
+            # Supabase puede devolver Decimal o float; normalizar
+            if round(float(ex_val or 0), 6) != round(float(new_val or 0), 6):
+                return True
+        else:
+            if str(ex_val or '') != str(new_val or ''):
+                return True
+    return False
+
+
 def sync_psd2():
     mode = '🔬 DRY-RUN' if DRY_RUN else '🔄 LIVE'
     logger.info(f'{mode} Iniciando sincronización PSD2...')
@@ -180,6 +207,8 @@ def sync_psd2():
 
     total_txns = 0
     total_inserted = 0
+    total_updated = 0
+    total_unchanged = 0
 
     for link in links:
         conn = link['bank_connections']
@@ -204,44 +233,96 @@ def sync_psd2():
         total_txns += len(txns)
 
         # P-011: seen_hashes por cuenta (no global) → counter por batch
-        seen_hashes = {}
+        seen_hashes: dict = {}
         records = [map_txn(t, account_id, bc_id, uid, seen_hashes) for t in txns]
 
-        # Reportar colisiones detectadas en este batch
         collisions = sum(1 for v in seen_hashes.values() if v > 1)
         if collisions:
             logger.info(f'  🔍 {collisions} colisiones de hash resueltas con sufijo _seqN')
 
-        # Verificar unicidad
         ext_ids = [r['external_id'] for r in records]
         if len(set(ext_ids)) != len(ext_ids):
             logger.error(f'  ❌ DUPLICADOS DETECTADOS tras fix: {len(ext_ids) - len(set(ext_ids))}')
             continue
 
+        # P-013: batch SELECT para clasificar INSERT / UPDATE / sin cambios
+        select_fields = ', '.join(['external_id'] + list(BANK_FIELDS))
+        existing_rows = sb.table('transactions').select(select_fields) \
+            .in_('external_id', ext_ids).eq('source', 'psd2').execute()
+        existing_by_id = {row['external_id']: row for row in (existing_rows.data or [])}
+
+        to_insert: list[dict] = []
+        to_update: list[dict] = []
+        unchanged_count = 0
+
+        for rec in records:
+            ex = existing_by_id.get(rec['external_id'])
+            if ex is None:
+                to_insert.append(rec)
+            elif _bank_fields_changed(ex, rec):
+                to_update.append(rec)
+            else:
+                unchanged_count += 1
+
         if DRY_RUN:
-            for rec in records[:3]:
-                logger.info(f"    🔬 PREVIEW: {rec['date']} | {rec['amount']:8.2f} EUR | {rec['external_id'][:30]}... | {rec['description'][:50]}")
-            logger.info(f'  🔬 DRY-RUN: NO se insertan (verían {len(records)} registros, todos únicos)')
+            for rec in to_insert[:3]:
+                logger.info(
+                    f"    🔬 INSERT: {rec['date']} | {rec['amount']:8.2f} EUR | "
+                    f"{rec['external_id'][:30]} | {(rec['description'] or '')[:50]}"
+                )
+            for rec in to_update[:3]:
+                logger.info(
+                    f"    🔬 UPDATE: {rec['date']} | {rec['amount']:8.2f} EUR | "
+                    f"{rec['external_id'][:30]} | {(rec['description'] or '')[:50]}"
+                )
+            logger.info(
+                f'  🔬 DRY-RUN: {len(to_insert)} insertarían · '
+                f'{len(to_update)} actualizarían · {unchanged_count} sin cambios'
+            )
+            total_inserted += len(to_insert)
+            total_updated += len(to_update)
+            total_unchanged += unchanged_count
             continue
 
-        # LIVE: insert real
+        # LIVE
         inserted_here = 0
-        for rec in records:
+        updated_here = 0
+
+        for rec in to_insert:
             try:
-                sb.table('transactions').delete().eq('external_id', rec['external_id']).eq('source', 'psd2').execute()
                 sb.table('transactions').insert(rec).execute()
                 inserted_here += 1
             except Exception as e:
-                logger.warning(f"    ⚠️  Error en {rec['external_id']}: {e}")
+                logger.warning(f"    ⚠️  INSERT {rec['external_id']}: {e}")
+
+        for rec in to_update:
+            update_payload = {f: rec[f] for f in BANK_FIELDS}
+            try:
+                sb.table('transactions').update(update_payload) \
+                    .eq('external_id', rec['external_id']) \
+                    .eq('source', 'psd2').execute()
+                updated_here += 1
+            except Exception as e:
+                logger.warning(f"    ⚠️  UPDATE {rec['external_id']}: {e}")
 
         total_inserted += inserted_here
-        logger.info(f'  ✅ {inserted_here} txns insertadas')
+        total_updated += updated_here
+        total_unchanged += unchanged_count
+
+        logger.info(
+            f'  ✅ {inserted_here} insertadas · {updated_here} actualizadas · '
+            f'{unchanged_count} sin cambios'
+        )
 
         sb.table('bank_account_links').update({
             'last_sync_at': datetime.now(timezone.utc).isoformat()
         }).eq('id', link['id']).execute()
 
-    logger.info(f'✅ Sync completada · {total_txns} descargadas · {total_inserted} insertadas')
+    logger.info(
+        f'✅ Sync completada · {total_txns} descargadas · '
+        f'{total_inserted} insertadas · {total_updated} actualizadas · '
+        f'{total_unchanged} sin cambios'
+    )
 
 
 if __name__ == '__main__':
