@@ -158,6 +158,26 @@ Las anulaciones (`ANUL.`, devoluciones cajero) son válidas: PSD2 muestra la ver
 
 ---
 
+## P-013 · 13-may-2026 · **RESUELTO** (commit d413bd1)
+**Sync diario borraba categorizaciones manuales de transacciones PSD2**
+
+El loop LIVE de `sync_psd2.py` hacía `DELETE + INSERT` por cada txn descargada, sobreescribiendo todos los campos incluyendo los de categorización manual (`titular`, `account_id`, `nature`, `category_id`, `project_id`, `paid_by_user_id`, `is_reimbursable`, `reimbursed_at`).
+
+**Caso real que dispara el parche:**
+Txns de tarjeta de Ana que llegan vía cuenta Santander común se re-mapean manualmente a `titular='ana'` + cuenta `Tarjeta Santander Ana`. El siguiente sync diario las revertía a `titular='eric'` + cuenta Santander común.
+
+**Fix aplicado:**
+- Definida constante `BANK_FIELDS` con los 8 campos del banco que el sync puede tocar
+- Batch SELECT previo: un solo query por cuenta, recupera filas existentes por `external_id`
+- Clasificación en tres cubos: `to_insert` / `to_update` / `unchanged`
+- UPDATE selectivo: solo `{f: rec[f] for f in BANK_FIELDS}`, nunca toca campos de categorización
+- Helper `_bank_fields_changed()` normaliza `amount` a float para comparación correcta
+- DRY_RUN acumula totales correctamente y muestra previews de INSERTs y UPDATEs
+
+**Verificación:** DRY_RUN tras P-013 sobre las 160 txns previas = 0 insertarían / 0 actualizarían / 160 sin cambios. LIVE 14-may-2026: 6 txns nuevas insertadas / 0 actualizadas / 160 sin cambios.
+
+---
+
 ## Deuda técnica pendiente
 
 | ID | Descripción | Prioridad |
