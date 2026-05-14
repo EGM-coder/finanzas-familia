@@ -16,10 +16,25 @@ P-013 fix (13-may-2026):
 - Batch SELECT previo por external_id para clasificar INSERT / UPDATE / sin cambios
 - Logging: "X insertadas, Y actualizadas, Z sin cambios" por banco y en total
 
+Fase 1 v10 (14-may-2026): classification_rules en INSERT
+- Carga reglas activas (is_active=true) una vez al inicio del run, ordered by priority asc
+- Aplica la primera regla que matchea a cada txn nueva (rama to_insert)
+- Sobreescribe en rec los campos correspondientes a set_* no-null de la regla:
+    set_account_id → account_id, set_titular → titular,
+    set_category_id → category_id, set_project_id → project_id,
+    set_nature → nature, set_paid_by_user_id → paid_by_user_id,
+    set_is_reimbursable → is_reimbursable
+- UPDATEs NO disparan reglas (preservan estado manual; coherente con P-013)
+- Match case-insensitive (D1)
+- Reglas mal configuradas → skip + warning, NO abortan el sync (D2)
+- Operadores soportados: contains, equals, starts_with, regex
+- Campos soportados en match_field: counterparty, raw_concept, description
+
 Modo DRY_RUN: exporta DRY_RUN=1 para ver qué insertaría/actualizaría sin escribir a DB.
 """
 
 import os
+import re
 import json
 import hashlib
 import logging
@@ -52,6 +67,19 @@ BANK_FIELDS = (
     'amount', 'date', 'description', 'raw_concept', 'currency',
     'bank_connection_id', 'counterparty', 'source_id',
 )
+
+# Fase 1 v10: mapeo de columnas set_* (en classification_rules) a campos del rec
+RULE_SETTERS = {
+    'set_account_id':       'account_id',
+    'set_titular':          'titular',
+    'set_category_id':      'category_id',
+    'set_project_id':       'project_id',
+    'set_nature':           'nature',
+    'set_paid_by_user_id':  'paid_by_user_id',
+    'set_is_reimbursable':  'is_reimbursable',
+}
+RULE_ALLOWED_FIELDS = {'counterparty', 'raw_concept', 'description'}
+RULE_ALLOWED_OPS = {'contains', 'equals', 'starts_with', 'regex'}
 
 sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
@@ -189,9 +217,81 @@ def _bank_fields_changed(existing: dict, new_rec: dict) -> bool:
     return False
 
 
+def load_active_rules() -> list:
+    """
+    Fase 1 v10: carga reglas de classification_rules activas, ordered by priority asc.
+    Una sola llamada al inicio del run; las reglas se mantienen en memoria.
+    """
+    response = sb.table('classification_rules').select('*') \
+        .eq('is_active', True).order('priority').execute()
+    return response.data or []
+
+
+def _match_rule(rec: dict, rule: dict) -> bool:
+    """
+    Devuelve True si la regla matchea contra rec. Case-INsensitive (D1).
+    Operadores: contains, equals, starts_with, regex.
+    Reglas mal configuradas (campo/operador inválidos, regex roto) → False + warning.
+    """
+    field = rule.get('match_field')
+    op = rule.get('match_operator')
+    val = rule.get('match_value')
+    rule_id = rule.get('id', '?')
+
+    if field not in RULE_ALLOWED_FIELDS:
+        logger.warning(f"    ⚠️  rule#{rule_id} match_field inválido: {field!r} (skip)")
+        return False
+    if op not in RULE_ALLOWED_OPS:
+        logger.warning(f"    ⚠️  rule#{rule_id} match_operator inválido: {op!r} (skip)")
+        return False
+    if not val:
+        logger.warning(f"    ⚠️  rule#{rule_id} match_value vacío (skip)")
+        return False
+
+    field_value = rec.get(field) or ''
+    if not field_value:
+        return False
+
+    fv_lower = field_value.lower()
+    mv_lower = val.lower()
+
+    if op == 'contains':
+        return mv_lower in fv_lower
+    if op == 'equals':
+        return fv_lower == mv_lower
+    if op == 'starts_with':
+        return fv_lower.startswith(mv_lower)
+    if op == 'regex':
+        try:
+            return re.search(val, field_value, re.IGNORECASE) is not None
+        except re.error as e:
+            logger.warning(f"    ⚠️  rule#{rule_id} regex inválida {val!r}: {e} (skip)")
+            return False
+    return False
+
+
+def _apply_first_matching_rule(rec: dict, rules: list) -> Optional[dict]:
+    """
+    Aplica al rec la primera regla activa que matchea. Sobreescribe campos del rec
+    para cada columna set_* no-null de la regla. Devuelve la regla aplicada (o None).
+    """
+    for rule in rules:
+        if not _match_rule(rec, rule):
+            continue
+        for set_col, rec_col in RULE_SETTERS.items():
+            if rule.get(set_col) is not None:
+                rec[rec_col] = rule[set_col]
+        return rule
+    return None
+
+
 def sync_psd2():
     mode = '🔬 DRY-RUN' if DRY_RUN else '🔄 LIVE'
     logger.info(f'{mode} Iniciando sincronización PSD2...')
+
+    # Fase 1 v10: cargar reglas activas una vez por run
+    rules = load_active_rules()
+    logger.info(f'📋 {len(rules)} reglas de categorización activas')
 
     response = sb.table('bank_account_links').select(
         'id, account_id, bank_connection_id, external_account_uid, external_iban, '
@@ -209,6 +309,7 @@ def sync_psd2():
     total_inserted = 0
     total_updated = 0
     total_unchanged = 0
+    total_rules_applied = 0
 
     for link in links:
         conn = link['bank_connections']
@@ -264,6 +365,21 @@ def sync_psd2():
             else:
                 unchanged_count += 1
 
+        # Fase 1 v10: aplicar reglas a INSERTS (no a UPDATEs, que preservan estado manual)
+        rules_applied_here = 0
+        if rules:
+            for rec in to_insert:
+                matched = _apply_first_matching_rule(rec, rules)
+                if matched:
+                    rules_applied_here += 1
+                    logger.info(
+                        f"    🏷️  rule#{matched.get('id', '?')} "
+                        f"(prio={matched.get('priority', '?')}) matched on "
+                        f"{matched['match_field']} {matched['match_operator']} "
+                        f"{matched['match_value']!r} → "
+                        f"{rec['external_id'][:24]}"
+                    )
+
         if DRY_RUN:
             for rec in to_insert[:3]:
                 logger.info(
@@ -276,12 +392,13 @@ def sync_psd2():
                     f"{rec['external_id'][:30]} | {(rec['description'] or '')[:50]}"
                 )
             logger.info(
-                f'  🔬 DRY-RUN: {len(to_insert)} insertarían · '
+                f'  🔬 DRY-RUN: {len(to_insert)} insertarían ({rules_applied_here} con regla) · '
                 f'{len(to_update)} actualizarían · {unchanged_count} sin cambios'
             )
             total_inserted += len(to_insert)
             total_updated += len(to_update)
             total_unchanged += unchanged_count
+            total_rules_applied += rules_applied_here
             continue
 
         # LIVE
@@ -308,10 +425,11 @@ def sync_psd2():
         total_inserted += inserted_here
         total_updated += updated_here
         total_unchanged += unchanged_count
+        total_rules_applied += rules_applied_here
 
         logger.info(
-            f'  ✅ {inserted_here} insertadas · {updated_here} actualizadas · '
-            f'{unchanged_count} sin cambios'
+            f'  ✅ {inserted_here} insertadas ({rules_applied_here} con regla) · '
+            f'{updated_here} actualizadas · {unchanged_count} sin cambios'
         )
 
         sb.table('bank_account_links').update({
@@ -320,8 +438,8 @@ def sync_psd2():
 
     logger.info(
         f'✅ Sync completada · {total_txns} descargadas · '
-        f'{total_inserted} insertadas · {total_updated} actualizadas · '
-        f'{total_unchanged} sin cambios'
+        f'{total_inserted} insertadas ({total_rules_applied} con regla) · '
+        f'{total_updated} actualizadas · {total_unchanged} sin cambios'
     )
 
 
