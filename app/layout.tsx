@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Newsreader } from 'next/font/google'
+import { Toaster } from 'sonner'
 import "./globals.css";
 
 const geistSans = Geist({
@@ -43,6 +44,24 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning className={`${newsreader.variable} ${geist.variable} ${geistSans.variable} ${geistMono.variable}`}>
       <body className="antialiased egm">
         {children}
+        <Toaster
+          position="bottom-center"
+          duration={5000}
+          visibleToasts={3}
+          toastOptions={{
+            style: {
+              background: 'var(--paper)',
+              color: 'var(--ink-1)',
+              border: '1px solid var(--rule)',
+              borderRadius: 0,
+              boxShadow: 'none',
+              fontFamily: 'var(--sans)',
+              fontSize: '13px',
+              letterSpacing: '0.01em',
+              padding: '12px 16px',
+            },
+          }}
+        />
       </body>
     </html>
   );
