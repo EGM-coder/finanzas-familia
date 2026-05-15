@@ -178,6 +178,13 @@ Txns de tarjeta de Ana que llegan vía cuenta Santander común se re-mapean manu
 
 ---
 
+## P-014 · (regla permanente)
+**Next.js `<Link>` no acepta prop `disabled`**
+
+Para estados deshabilitados en navegación interna con `<Link>`, conmutar el elemento (no la prop): `<Link>` cuando activo, `<span>` con estilos disabled cuando borde. Aplicado primero en `ControlPagination.tsx` (hotfix T-001, 15-may-2026). Patrón a replicar en cualquier paginación o navegación con bordes condicionales (drawer Fase 3 y posteriores).
+
+---
+
 ## Deuda técnica pendiente
 
 | ID | Descripción | Prioridad |
