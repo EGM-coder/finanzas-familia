@@ -65,7 +65,7 @@ export default async function ControlPage({ searchParams }: Props) {
       {data && data.length > 0 ? (
         <>
           <ControlTable rows={data as unknown as Parameters<typeof ControlTable>[0]['rows']} />
-          <ControlPagination page={page} totalPages={totalPages} total={totalForFilter} />
+          <ControlPagination page={page} totalPages={totalPages} total={totalForFilter} filter={filter} />
         </>
       ) : (
         <ControlEmpty filter={filter} />

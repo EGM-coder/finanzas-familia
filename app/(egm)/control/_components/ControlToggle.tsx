@@ -1,5 +1,5 @@
 'use client'
-import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 
 interface Props {
   pendientes: number
@@ -8,21 +8,10 @@ interface Props {
 }
 
 export function ControlToggle({ pendientes, total, active }: Props) {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-
-  const go = (filter: 'pendientes' | 'todas') => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('filter', filter)
-    params.set('page', '1')
-    router.push(`/control?${params.toString()}`)
-  }
-
   const itemStyle = (key: 'pendientes' | 'todas'): React.CSSProperties => ({
-    background: 'none',
-    border: 'none',
+    display: 'inline-block',
+    textDecoration: 'none',
     padding: '0 0 4px',
-    cursor: 'pointer',
     fontFamily: 'var(--sans)',
     fontSize: 13,
     fontWeight: 500,
@@ -34,12 +23,12 @@ export function ControlToggle({ pendientes, total, active }: Props) {
 
   return (
     <div style={{ display: 'flex', gap: 24, marginBottom: 24 }}>
-      <button style={itemStyle('pendientes')} onClick={() => go('pendientes')}>
+      <Link prefetch href="?filter=pendientes&page=1" style={itemStyle('pendientes')}>
         Pendientes · <span className="num" style={{ fontSize: 13 }}>{pendientes}</span>
-      </button>
-      <button style={itemStyle('todas')} onClick={() => go('todas')}>
+      </Link>
+      <Link prefetch href="?filter=todas&page=1" style={itemStyle('todas')}>
         Todas · <span className="num" style={{ fontSize: 13 }}>{total}</span>
-      </button>
+      </Link>
     </div>
   )
 }
