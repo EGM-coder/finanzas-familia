@@ -1,31 +1,30 @@
 'use client'
-import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 
 interface Props {
   page: number
   totalPages: number
   total: number
+  filter: 'pendientes' | 'todas'
 }
 
-export function ControlPagination({ page, totalPages, total }: Props) {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-
-  const go = (newPage: number) => {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('page', String(newPage))
-    router.push(`/control?${params.toString()}`)
-  }
-
-  const btnStyle = (disabled: boolean): React.CSSProperties => ({
+export function ControlPagination({ page, totalPages, total, filter }: Props) {
+  const activeBtnStyle: React.CSSProperties = {
     fontFamily: 'var(--sans)', fontSize: 11, fontWeight: 500,
     letterSpacing: '0.08em', textTransform: 'uppercase',
     padding: '8px 14px', background: 'transparent',
     border: '1px solid var(--rule)',
-    color: disabled ? 'var(--ink-4)' : 'var(--ink-3)',
-    cursor: disabled ? 'default' : 'pointer',
+    color: 'var(--ink-3)',
+    display: 'inline-block', textDecoration: 'none',
     transition: 'all .15s',
-  })
+  }
+
+  const disabledBtnStyle: React.CSSProperties = {
+    ...activeBtnStyle,
+    color: 'var(--ink-4)',
+    cursor: 'not-allowed',
+    opacity: 0.6,
+  }
 
   return (
     <div style={{
@@ -34,13 +33,10 @@ export function ControlPagination({ page, totalPages, total }: Props) {
       borderTop: '1px solid var(--rule)',
     }}>
       <div>
-        <button
-          style={btnStyle(page === 1)}
-          disabled={page === 1}
-          onClick={() => go(page - 1)}
-        >
-          ← Anterior
-        </button>
+        {page > 1
+          ? <Link prefetch href={`?filter=${filter}&page=${page - 1}`} style={activeBtnStyle}>← Anterior</Link>
+          : <span style={disabledBtnStyle}>← Anterior</span>
+        }
       </div>
 
       <div className="roman" style={{ fontSize: 12, color: 'var(--ink-3)', textAlign: 'center' }}>
@@ -48,13 +44,10 @@ export function ControlPagination({ page, totalPages, total }: Props) {
       </div>
 
       <div style={{ textAlign: 'right' }}>
-        <button
-          style={btnStyle(page === totalPages)}
-          disabled={page === totalPages}
-          onClick={() => go(page + 1)}
-        >
-          Siguiente →
-        </button>
+        {page < totalPages
+          ? <Link prefetch href={`?filter=${filter}&page=${page + 1}`} style={activeBtnStyle}>Siguiente →</Link>
+          : <span style={disabledBtnStyle}>Siguiente →</span>
+        }
       </div>
     </div>
   )
