@@ -109,3 +109,17 @@
   background-size: 80px 100%;
   background-position: 0 0;
 }
+
+/* Fase 3 — filas clickables */
+.egm-row-clickable {
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.egm-row-clickable:hover {
+  background-color: rgba(0,0,0,0.025);
+}
+@media (prefers-color-scheme: dark) {
+  .egm-row-clickable:hover {
+    background-color: rgba(255,255,255,0.04);
+  }
+}

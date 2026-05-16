@@ -41,6 +41,7 @@ export function CategorizationDrawer({ transaction, onClose }: Props) {
     >
       <Drawer.Portal>
         <Drawer.Overlay
+          className="egm"
           style={{
             position: 'fixed',
             inset: 0,
@@ -49,6 +50,7 @@ export function CategorizationDrawer({ transaction, onClose }: Props) {
           }}
         />
         <Drawer.Content
+          className="egm"
           style={{
             position: 'fixed',
             top: 0,
