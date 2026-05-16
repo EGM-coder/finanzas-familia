@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { ControlHeader } from './_components/ControlHeader'
 import { ControlToggle } from './_components/ControlToggle'
-import { ControlTable } from './_components/ControlTable'
+import { ControlClientShell } from './_components/ControlClientShell'
 import { ControlPagination } from './_components/ControlPagination'
 import { ControlEmpty } from './_components/ControlEmpty'
 
@@ -40,7 +40,7 @@ export default async function ControlPage({ searchParams }: Props) {
   let query = supabase
     .from('transactions')
     .select(`
-      id, date, description, amount, currency, nature, titular, is_reimbursable,
+      id, date, description, counterparty, raw_concept, amount, currency, nature, titular, is_reimbursable,
       accounts(institution, name),
       categories(id, name, color, parent_id),
       projects(id, name)
@@ -64,7 +64,7 @@ export default async function ControlPage({ searchParams }: Props) {
       <ControlToggle pendientes={pendientes} total={total} active={filter} />
       {data && data.length > 0 ? (
         <>
-          <ControlTable rows={data as unknown as Parameters<typeof ControlTable>[0]['rows']} />
+          <ControlClientShell rows={data as unknown as Parameters<typeof ControlClientShell>[0]['rows']} />
           <ControlPagination page={page} totalPages={totalPages} total={totalForFilter} filter={filter} />
         </>
       ) : (

@@ -1,3 +1,4 @@
+'use client'
 import { fmtDate, fmtAmount } from '../../_lib/formatters'
 
 interface Category {
@@ -7,10 +8,12 @@ interface Category {
   parent_id: string | null
 }
 
-interface Row {
+export interface Row {
   id: string
   date: string
   description: string | null
+  counterparty: string | null
+  raw_concept: string | null
   amount: number
   currency: string
   nature: string | null
@@ -23,6 +26,7 @@ interface Row {
 
 interface Props {
   rows: Row[]
+  onRowClick?: (row: Row) => void
 }
 
 function CategoryCell({ cat }: { cat: Category | null }) {
@@ -57,7 +61,7 @@ const COL_STYLES: React.CSSProperties[] = [
 
 const HEADERS = ['FECHA', 'DESCRIPCIÓN', 'CUENTA', 'TITULAR', 'CATEGORÍA', 'MONTO']
 
-export function ControlTable({ rows }: Props) {
+export function ControlTable({ rows, onRowClick }: Props) {
   return (
     <div style={{ marginBottom: 24 }}>
       {/* Header */}
@@ -75,6 +79,8 @@ export function ControlTable({ rows }: Props) {
       {rows.map((row) => (
         <div
           key={row.id}
+          onClick={onRowClick ? () => onRowClick(row) : undefined}
+          className={onRowClick ? 'egm-row-clickable' : undefined}
           style={{
             display: 'flex', gap: 16, alignItems: 'center',
             padding: '14px 0',
