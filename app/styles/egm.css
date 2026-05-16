@@ -1,49 +1,58 @@
 /* ============================================================
    EGMFin — Sistema visual único · Light + Dark
-   Paleta original del dossier: blanco/gris/negro + verde/rojo
-   solo para señales (positivo/negativo/alerta).
+   Tokens en :root para que Portals (vaul, radix, etc.) hereden.
    Fuentes inyectadas vía next/font/google en app/layout.tsx
    ============================================================ */
 
-.egm {
-  /* ── light (default) ── */
-  --bg:        #ffffff;
-  --bg-soft:   #fafaf9;
-  --bg-card:   #ffffff;
-  --rule:      #e6e6e3;
-  --rule-2:    #f0f0ec;
-  --ink:       #111111;
-  --ink-2:     #2b2b2b;
-  --ink-3:     #6b6b6b;
-  --ink-4:     #9a9a98;
-  --signal-pos:#1f6b3a;
-  --signal-neg:#9c1f1f;
+/* ── Tokens globales (light default) ── */
+:root {
+  --paper:      #ffffff;
+  --bg:         #ffffff;
+  --bg-soft:    #fafaf9;
+  --bg-card:    #ffffff;
+  --rule:       #e6e6e3;
+  --rule-2:     #f0f0ec;
+  --ink:        #111111;
+  --ink-1:      #111111;
+  --ink-2:      #2b2b2b;
+  --ink-3:      #6b6b6b;
+  --ink-4:      #9a9a98;
+  --signal-pos: #1f6b3a;
+  --signal-neg: #9c1f1f;
   --signal-warn:#8a6a1a;
+  --positive:   var(--signal-pos);
 
   --serif: var(--font-newsreader), 'Times New Roman', serif;
   --sans:  var(--font-geist), -apple-system, system-ui, sans-serif;
   --mono:  var(--font-geist-mono), ui-monospace, monospace;
+}
 
+/* ── Dark — next-themes añade clase .dark al <html> ── */
+.dark {
+  --paper:      #0e0e0d;
+  --bg:         #0e0e0d;
+  --bg-soft:    #141413;
+  --bg-card:    #1a1a18;
+  --rule:       #2a2a27;
+  --rule-2:     #1f1f1d;
+  --ink:        #f4f1ea;
+  --ink-1:      #f4f1ea;
+  --ink-2:      #d6d3cc;
+  --ink-3:      #8e8a82;
+  --ink-4:      #56544f;
+  --signal-pos: #86b08a;
+  --signal-neg: #d98a8a;
+  --signal-warn:#c9a55c;
+  --positive:   var(--signal-pos);
+}
+
+/* ── Shell EGMFin ── */
+.egm {
   color: var(--ink);
   background: var(--bg);
   font-family: var(--sans);
   font-feature-settings: 'ss01', 'cv11';
   -webkit-font-smoothing: antialiased;
-}
-
-.egm.dark {
-  --bg:        #0e0e0d;
-  --bg-soft:   #141413;
-  --bg-card:   #1a1a18;
-  --rule:      #2a2a27;
-  --rule-2:    #1f1f1d;
-  --ink:       #f4f1ea;
-  --ink-2:     #d6d3cc;
-  --ink-3:     #8e8a82;
-  --ink-4:     #56544f;
-  --signal-pos:#86b08a;
-  --signal-neg:#d98a8a;
-  --signal-warn:#c9a55c;
 }
 
 /* ── Tipografía ── */
@@ -63,7 +72,7 @@
 .egm .card          { background: var(--bg-card); border: 1px solid var(--rule); }
 .egm .card-soft     { background: var(--bg-soft); border: 1px solid var(--rule-2); }
 
-/* ── Señales (colorblock, no chips coloreados) ── */
+/* ── Señales ── */
 .egm .pos           { color: var(--signal-pos); }
 .egm .neg           { color: var(--signal-neg); }
 .egm .warn          { color: var(--signal-warn); }
@@ -79,6 +88,12 @@
 .egm .btn-fill      { background: var(--ink); color: var(--bg); }
 .egm .btn-fill:hover{ background: var(--ink-2); }
 .egm .btn-ghost     { border-color: var(--rule); color: var(--ink-3); }
+
+/* ── Focus visible ── */
+.egm button:focus-visible {
+  outline: 2px solid var(--ink-1);
+  outline-offset: 2px;
+}
 
 /* ── Inputs ── */
 .egm input[type=text], .egm input[type=range] { font-family: var(--mono); }
@@ -110,16 +125,26 @@
   background-position: 0 0;
 }
 
-/* Fase 3 — filas clickables */
+/* ── Filas clickables ── */
 .egm-row-clickable {
   cursor: pointer;
   transition: background-color 150ms ease;
 }
-.egm-row-clickable:hover {
-  background-color: rgba(0,0,0,0.025);
+.egm-row-clickable:hover { background-color: rgba(0,0,0,0.025); }
+.dark .egm-row-clickable:hover { background-color: rgba(255,255,255,0.04); }
+
+/* ── cmdk — Category Combobox ── */
+[data-cmdk-group-heading] {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  padding: 12px 14px 6px;
+  display: block;
 }
-@media (prefers-color-scheme: dark) {
-  .egm-row-clickable:hover {
-    background-color: rgba(255,255,255,0.04);
-  }
+[data-cmdk-item][data-selected='true'] {
+  background: var(--rule);
 }
+[data-cmdk-item] { outline: none; }

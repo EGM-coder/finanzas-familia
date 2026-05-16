@@ -16,6 +16,7 @@ export interface Row {
   raw_concept: string | null
   amount: number
   currency: string
+  category_id: string | null
   nature: string | null
   titular: string | null
   is_reimbursable: boolean | null

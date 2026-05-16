@@ -22,7 +22,7 @@ export default async function ControlPage({ searchParams }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [totalRes, pendientesRes] = await Promise.all([
+  const [totalRes, pendientesRes, categoriesRes] = await Promise.all([
     supabase
       .from('transactions')
       .select('id', { count: 'exact', head: true })
@@ -32,15 +32,22 @@ export default async function ControlPage({ searchParams }: Props) {
       .select('id', { count: 'exact', head: true })
       .eq('source', 'psd2')
       .is('category_id', null),
+    supabase
+      .from('categories')
+      .select('id, name, parent_id, color, is_active')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true }),
   ])
 
   const total = totalRes.count ?? 0
   const pendientes = pendientesRes.count ?? 0
+  const categories = categoriesRes.data ?? []
 
   let query = supabase
     .from('transactions')
     .select(`
-      id, date, description, counterparty, raw_concept, amount, currency, nature, titular, is_reimbursable,
+      id, date, description, counterparty, raw_concept, amount, currency, category_id, nature, titular, is_reimbursable,
       accounts(institution, name),
       categories(id, name, color, parent_id),
       projects(id, name)
@@ -64,7 +71,7 @@ export default async function ControlPage({ searchParams }: Props) {
       <ControlToggle pendientes={pendientes} total={total} active={filter} />
       {data && data.length > 0 ? (
         <>
-          <ControlClientShell rows={data as unknown as Parameters<typeof ControlClientShell>[0]['rows']} />
+          <ControlClientShell rows={data as unknown as Parameters<typeof ControlClientShell>[0]['rows']} categories={categories} />
           <ControlPagination page={page} totalPages={totalPages} total={totalForFilter} filter={filter} />
         </>
       ) : (

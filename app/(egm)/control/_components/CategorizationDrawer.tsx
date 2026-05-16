@@ -1,19 +1,8 @@
 'use client'
 
+import { useState, useEffect, useRef } from 'react'
 import { Drawer } from 'vaul'
-
-/**
- * CategorizationDrawer — slide-from-right drawer para categorizar transacciones.
- * Fase 3, Paso 3: esqueleto. Lógica de campos en pasos 5-6, server actions en 7-8.
- *
- * Lenguaje visual EGMFin (doctrina pura):
- * - sin border-radius, sin box-shadow
- * - overlay sólido fade (no backdrop blur)
- * - tipografía Newsreader (display) + Geist (controls)
- * - ancho 480px desktop, full-width mobile
- *
- * Vaul aporta gratis: drag-to-close, focus trap, esc, click-outside, accesibilidad.
- */
+import { CategoryCombobox, type Category } from './CategoryCombobox'
 
 type TransactionRow = {
   id: string
@@ -23,15 +12,89 @@ type TransactionRow = {
   counterparty: string | null
   raw_concept: string | null
   description: string | null
+  category_id: string | null
 }
 
 interface Props {
-  transaction: TransactionRow | null   // null = cerrado
+  transaction: TransactionRow | null
+  categories: Category[]
   onClose: () => void
 }
 
-export function CategorizationDrawer({ transaction, onClose }: Props) {
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontFamily: 'var(--sans)',
+      fontSize: 11,
+      fontWeight: 500,
+      textTransform: 'uppercase',
+      letterSpacing: '0.1em',
+      color: 'var(--ink-3)',
+      marginBottom: 8,
+    }}>
+      {children}
+    </div>
+  )
+}
+
+function GhostField({ label }: { label: string }) {
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <div style={{
+        border: '1px solid var(--rule)',
+        padding: '0 14px',
+        height: 40,
+        boxSizing: 'border-box',
+        background: 'transparent',
+        fontFamily: 'var(--sans)',
+        fontSize: 12,
+        fontStyle: 'italic',
+        color: 'var(--ink-4)',
+        cursor: 'not-allowed',
+        opacity: 0.6,
+        display: 'flex',
+        alignItems: 'center',
+      }}>
+        Próximamente
+      </div>
+    </div>
+  )
+}
+
+export function CategorizationDrawer({ transaction, categories, onClose }: Props) {
   const isOpen = transaction !== null
+  const [categoryId, setCategoryId] = useState<string | null>(transaction?.category_id ?? null)
+  const categoryWrapperRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setCategoryId(transaction?.category_id ?? null)
+  }, [transaction?.id])
+
+  // Focus trigger del combobox al abrir
+  useEffect(() => {
+    if (!isOpen) return
+    const timer = setTimeout(() => {
+      categoryWrapperRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
+    }, 120)
+    return () => clearTimeout(timer)
+  }, [isOpen])
+
+  // Cmd/Ctrl+Enter — reservado para Paso 7
+  useEffect(() => {
+    if (!isOpen) return
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault()
+        // TODO: Paso 7 — submit
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [isOpen])
+
+  const fmtAmount = (n: number, cur: string) =>
+    n.toLocaleString('es-ES', { style: 'currency', currency: cur || 'EUR' })
 
   return (
     <Drawer.Root
@@ -41,7 +104,6 @@ export function CategorizationDrawer({ transaction, onClose }: Props) {
     >
       <Drawer.Portal>
         <Drawer.Overlay
-          className="egm"
           style={{
             position: 'fixed',
             inset: 0,
@@ -50,142 +112,192 @@ export function CategorizationDrawer({ transaction, onClose }: Props) {
           }}
         />
         <Drawer.Content
-          className="egm"
+          aria-describedby={undefined}
           style={{
             position: 'fixed',
             top: 0,
             right: 0,
             bottom: 0,
-            width: '480px',
+            width: 480,
             maxWidth: '100vw',
             background: 'var(--paper)',
             borderLeft: '1px solid var(--rule)',
             borderRadius: 0,
             boxShadow: 'none',
-            padding: '32px',
+            zIndex: 51,
+            outline: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div style={{ display: 'none' }}><Drawer.Handle /></div>
+
+          {/* Zona scrollable */}
+          <div style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '32px 24px 24px',
             display: 'flex',
             flexDirection: 'column',
             gap: 24,
-            zIndex: 51,
-            overflowY: 'auto',
-            outline: 'none',
-          }}
-          aria-describedby={undefined}
-        >
-          {/* Vaul handle visual oculto (doctrina EGMFin) */}
-          <div style={{ display: 'none' }}>
-            <Drawer.Handle />
-          </div>
+          }}>
+            {/* Header */}
+            <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Drawer.Title style={{
+                fontFamily: 'var(--serif)',
+                fontSize: 22,
+                fontWeight: 400,
+                letterSpacing: '-0.01em',
+                lineHeight: 1.2,
+                color: 'var(--ink-1)',
+                margin: 0,
+              }}>
+                Categorizar
+              </Drawer.Title>
+              <button
+                onClick={onClose}
+                aria-label="Cerrar"
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'var(--rule)'
+                  e.currentTarget.style.color = 'var(--ink-1)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'transparent'
+                  e.currentTarget.style.color = 'var(--ink-3)'
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 8,
+                  color: 'var(--ink-3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 150ms ease, color 150ms ease',
+                  borderRadius: 0,
+                }}
+              >
+                <svg width={14} height={14} viewBox="0 0 14 14" fill="none"
+                  stroke="currentColor" strokeWidth={1.5} strokeLinecap="round">
+                  <path d="M1 1l12 12M13 1L1 13" />
+                </svg>
+              </button>
+            </header>
 
-          {/* Header */}
-          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <Drawer.Title style={{
-              fontFamily: 'var(--serif)',
-              fontSize: 24,
-              fontWeight: 400,
-              color: 'var(--ink-1)',
-              margin: 0,
-              letterSpacing: '-0.01em',
-            }}>
-              Categorizar
-            </Drawer.Title>
-            <button
-              onClick={onClose}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontFamily: 'var(--sans)',
-                fontSize: 13,
-                color: 'var(--ink-3)',
-                padding: 0,
-              }}
-              aria-label="Cerrar"
-            >
-              Esc
-            </button>
-          </header>
-
-          {/* Contexto de la transacción (read-only) */}
-          {transaction && (
-            <section style={{
-              borderTop: '1px solid var(--rule)',
-              borderBottom: '1px solid var(--rule)',
-              padding: '16px 0',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <span style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                  {transaction.date}
-                </span>
-                <span className="num" style={{
-                  fontFamily: 'var(--mono)',
-                  fontSize: 18,
-                  color: transaction.amount < 0 ? 'var(--ink-1)' : 'var(--positive, var(--ink-1))',
-                  fontVariantNumeric: 'tabular-nums',
-                }}>
-                  {transaction.amount.toLocaleString('es-ES', { style: 'currency', currency: transaction.currency || 'EUR' })}
-                </span>
-              </div>
-              <div style={{ fontFamily: 'var(--sans)', fontSize: 14, color: 'var(--ink-2)' }}>
-                {transaction.counterparty || transaction.description || '—'}
-              </div>
-              {transaction.raw_concept && (
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-4)' }}>
-                  {transaction.raw_concept}
+            {/* Contexto transacción (read-only) */}
+            {transaction && (
+              <section style={{
+                borderTop: '1px solid var(--rule)',
+                borderBottom: '1px solid var(--rule)',
+                padding: '16px 0',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span style={{
+                    fontFamily: 'var(--sans)',
+                    fontSize: 11,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    color: 'var(--ink-3)',
+                  }}>
+                    {transaction.date}
+                  </span>
+                  <span style={{
+                    fontFamily: 'var(--mono)',
+                    fontSize: 20,
+                    fontVariantNumeric: 'tabular-nums',
+                    letterSpacing: '-0.01em',
+                    color: transaction.amount >= 0
+                      ? 'var(--positive, var(--ink-1))'
+                      : 'var(--ink-1)',
+                  }}>
+                    {fmtAmount(transaction.amount, transaction.currency)}
+                  </span>
                 </div>
-              )}
-            </section>
-          )}
 
-          {/* PASO 5: combobox Categorías (placeholder) */}
-          <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-4)' }}>
-            [Paso 5] Categoría · combobox jerárquico solo hojas
+                <div style={{
+                  fontFamily: 'var(--sans)',
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  color: 'var(--ink-2)',
+                }}>
+                  {transaction.counterparty || transaction.description || '—'}
+                </div>
+
+                {transaction.raw_concept && (
+                  <div
+                    title={transaction.raw_concept}
+                    style={{
+                      fontFamily: 'var(--mono)',
+                      fontSize: 11,
+                      color: 'var(--ink-4)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {transaction.raw_concept}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Categoría */}
+            <div>
+              <FieldLabel>Categoría</FieldLabel>
+              <div ref={categoryWrapperRef}>
+                <CategoryCombobox
+                  categories={categories}
+                  value={categoryId}
+                  onChange={setCategoryId}
+                />
+              </div>
+            </div>
+
+            <GhostField label="Proyecto" />
+            <GhostField label="Naturaleza" />
+            <GhostField label="Titular" />
+            <GhostField label="Reembolsable Nordex" />
+            <GhostField label="Guardar como regla" />
           </div>
 
-          {/* PASO 6: campos restantes (placeholders) */}
-          <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-4)' }}>
-            [Paso 6] Proyecto · combobox creatable
-          </div>
-          <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-4)' }}>
-            [Paso 6] Naturaleza · select (5 valores schema)
-          </div>
-          <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-4)' }}>
-            [Paso 6] Titular · radio tri-state (eric / ana / compartido)
-          </div>
-          <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-4)' }}>
-            [Paso 6] Reembolsable Nordex · checkbox (disabled si titular≠eric)
-          </div>
-
-          {/* PASO 8: "Guardar como regla" (placeholder expandible) */}
-          <div style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-4)', marginTop: 'auto' }}>
-            [Paso 8] Guardar como regla · expandible
-          </div>
-
-          {/* Footer · botones (lógica en Paso 7) */}
+          {/* Footer sticky */}
           <footer style={{
             display: 'flex',
             justifyContent: 'flex-end',
             gap: 12,
-            paddingTop: 16,
+            padding: '16px 24px',
+            paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))',
             borderTop: '1px solid var(--rule)',
+            background: 'var(--paper)',
+            flexShrink: 0,
           }}>
             <button
               onClick={onClose}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = 'var(--ink-2)'
+                e.currentTarget.style.color = 'var(--ink-1)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--rule)'
+                e.currentTarget.style.color = 'var(--ink-2)'
+              }}
               style={{
                 fontFamily: 'var(--sans)',
                 fontSize: 11,
                 fontWeight: 500,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
-                padding: '8px 14px',
+                padding: '8px 16px',
                 background: 'transparent',
                 border: '1px solid var(--rule)',
                 borderRadius: 0,
-                color: 'var(--ink-3)',
+                color: 'var(--ink-2)',
                 cursor: 'pointer',
+                transition: 'border-color 150ms ease, color 150ms ease',
               }}
             >
               Cancelar
@@ -198,13 +310,13 @@ export function CategorizationDrawer({ transaction, onClose }: Props) {
                 fontWeight: 500,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
-                padding: '8px 14px',
+                padding: '8px 16px',
                 background: 'var(--ink-1)',
                 border: '1px solid var(--ink-1)',
                 borderRadius: 0,
                 color: 'var(--paper)',
                 cursor: 'not-allowed',
-                opacity: 0.4,
+                opacity: 0.3,
               }}
             >
               Guardar
