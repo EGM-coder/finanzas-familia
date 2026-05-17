@@ -31,6 +31,7 @@ export async function updateTransaction(
     .eq('id', id)
 
   if (error) {
+    console.error('[updateTransaction] supabase error:', JSON.stringify(error, null, 2))
     if (error.message.toLowerCase().includes('check constraint')) {
       return { ok: false, error: 'Valor no válido' }
     }
