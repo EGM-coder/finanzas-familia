@@ -148,3 +148,13 @@
   background: var(--rule);
 }
 [data-cmdk-item] { outline: none; }
+
+/* ── Fila eliminándose tras guardar ── */
+@keyframes egm-row-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+.egm-row-removing {
+  animation: egm-row-fade-out 300ms ease forwards;
+  pointer-events: none;
+}

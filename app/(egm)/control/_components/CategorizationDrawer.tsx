@@ -4,9 +4,11 @@ import { useState, useEffect, useRef } from 'react'
 import { Drawer } from 'vaul'
 import { CategoryCombobox, type Category } from './CategoryCombobox'
 import { ProjectCombobox, type Project } from './ProjectCombobox'
+import { toast } from 'sonner'
 import { NatureSelect, type NatureValue } from './NatureSelect'
 import { TitularRadio, type TitularValue } from './TitularRadio'
 import { ReimbursableCheckbox } from './ReimbursableCheckbox'
+import { updateTransaction, type UpdateTransactionPayload } from '../_actions/updateTransaction'
 
 type TransactionRow = {
   id: string
@@ -28,6 +30,9 @@ interface Props {
   categories: Category[]
   projects: Project[]
   onClose: () => void
+  onMarkRemoved: (id: string) => void
+  onRestoreRow: (id: string) => void
+  onRefreshAfterFade: () => void
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -71,14 +76,19 @@ function GhostField({ label }: { label: string }) {
   )
 }
 
-export function CategorizationDrawer({ transaction, categories, projects, onClose }: Props) {
+export function CategorizationDrawer({
+  transaction, categories, projects, onClose,
+  onMarkRemoved, onRestoreRow, onRefreshAfterFade,
+}: Props) {
   const isOpen = transaction !== null
   const [categoryId, setCategoryId] = useState<string | null>(transaction?.category_id ?? null)
   const [projectId, setProjectId] = useState<string | null>(transaction?.project_id ?? null)
   const [nature, setNature] = useState<NatureValue | null>((transaction?.nature as NatureValue | null) ?? null)
   const [titular, setTitular] = useState<TitularValue>((transaction?.titular as TitularValue) ?? 'compartido')
   const [isReimbursable, setIsReimbursable] = useState<boolean>(transaction?.is_reimbursable ?? false)
+  const [isSaving, setIsSaving] = useState(false)
   const categoryWrapperRef = useRef<HTMLDivElement>(null)
+  const handleSaveRef = useRef<(() => void) | undefined>(undefined)
 
   useEffect(() => {
     setCategoryId(transaction?.category_id ?? null)
@@ -102,21 +112,75 @@ export function CategorizationDrawer({ transaction, categories, projects, onClos
     return () => clearTimeout(timer)
   }, [isOpen])
 
-  // Cmd/Ctrl+Enter — reservado para Paso 7
+  // Cmd/Ctrl+Enter
   useEffect(() => {
     if (!isOpen) return
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault()
-        // TODO: Paso 7 — submit
+        handleSaveRef.current?.()
       }
     }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
   }, [isOpen])
 
   const fmtAmount = (n: number, cur: string) =>
     n.toLocaleString('es-ES', { style: 'currency', currency: cur || 'EUR' })
+
+  const canSave = categoryId !== null && !isSaving
+
+  async function handleSave() {
+    if (!canSave || !transaction) return
+    setIsSaving(true)
+
+    const snapshot: UpdateTransactionPayload = {
+      category_id:     transaction.category_id ?? null,
+      project_id:      transaction.project_id ?? null,
+      nature:          (transaction.nature as NatureValue | null) ?? null,
+      titular:         (transaction.titular as TitularValue) ?? 'compartido',
+      is_reimbursable: transaction.is_reimbursable ?? false,
+    }
+
+    const payload: UpdateTransactionPayload = {
+      category_id:     categoryId,
+      project_id:      projectId,
+      nature,
+      titular,
+      is_reimbursable: isReimbursable,
+    }
+
+    const result = await updateTransaction(transaction.id, payload)
+    setIsSaving(false)
+
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+
+    const txId = transaction.id
+    onMarkRemoved(txId)
+    onClose()
+    toast.success('Categorizada', {
+      duration: 5000,
+      action: {
+        label: 'Deshacer',
+        onClick: async () => {
+          const undo = await updateTransaction(txId, snapshot)
+          if (undo.ok) {
+            onRestoreRow(txId)
+            toast.success('Restaurada')
+          } else {
+            toast.error('No se pudo restaurar')
+          }
+        },
+      },
+    })
+    onRefreshAfterFade()
+  }
+
+  // Ref siempre apunta a la versión más reciente (evita closure stale en el listener)
+  handleSaveRef.current = handleSave
 
   return (
     <Drawer.Root
@@ -350,7 +414,8 @@ export function CategorizationDrawer({ transaction, categories, projects, onClos
               Cancelar
             </button>
             <button
-              disabled
+              disabled={!canSave}
+              onClick={handleSave}
               style={{
                 fontFamily: 'var(--sans)',
                 fontSize: 11,
@@ -361,12 +426,14 @@ export function CategorizationDrawer({ transaction, categories, projects, onClos
                 background: 'var(--ink-1)',
                 border: '1px solid var(--ink-1)',
                 borderRadius: 0,
-                color: 'var(--paper)',
-                cursor: 'not-allowed',
-                opacity: 0.3,
+                color: canSave ? 'var(--paper)' : 'var(--ink-3)',
+                fontStyle: isSaving ? 'italic' : 'normal',
+                cursor: canSave ? 'pointer' : 'not-allowed',
+                opacity: canSave ? 1 : 0.3,
+                transition: 'opacity 150ms ease',
               }}
             >
-              Guardar
+              {isSaving ? 'Guardando…' : 'Guardar'}
             </button>
           </footer>
         </Drawer.Content>

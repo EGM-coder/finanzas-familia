@@ -29,6 +29,7 @@ export interface Row {
 interface Props {
   rows: Row[]
   onRowClick?: (row: Row) => void
+  removedIds?: Set<string>
 }
 
 function CategoryCell({ cat }: { cat: Category | null }) {
@@ -63,7 +64,7 @@ const COL_STYLES: React.CSSProperties[] = [
 
 const HEADERS = ['FECHA', 'DESCRIPCIÓN', 'CUENTA', 'TITULAR', 'CATEGORÍA', 'MONTO']
 
-export function ControlTable({ rows, onRowClick }: Props) {
+export function ControlTable({ rows, onRowClick, removedIds }: Props) {
   return (
     <div style={{ marginBottom: 24 }}>
       {/* Header */}
@@ -78,11 +79,17 @@ export function ControlTable({ rows, onRowClick }: Props) {
       </div>
 
       {/* Rows */}
-      {rows.map((row) => (
+      {rows.map((row) => {
+        const isRemoving = removedIds?.has(row.id) ?? false
+        return (
         <div
           key={row.id}
-          onClick={onRowClick ? () => onRowClick(row) : undefined}
-          className={onRowClick ? 'egm-row-clickable' : undefined}
+          onClick={onRowClick && !isRemoving ? () => onRowClick(row) : undefined}
+          aria-hidden={isRemoving || undefined}
+          className={[
+            onRowClick ? 'egm-row-clickable' : '',
+            isRemoving ? 'egm-row-removing' : '',
+          ].filter(Boolean).join(' ') || undefined}
           style={{
             display: 'flex', gap: 16, alignItems: 'center',
             padding: '14px 0',
@@ -134,7 +141,7 @@ export function ControlTable({ rows, onRowClick }: Props) {
             {fmtAmount(row.amount, row.currency)}
           </div>
         </div>
-      ))}
+      )})}
     </div>
   )
 }
