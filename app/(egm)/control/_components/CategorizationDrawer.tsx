@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Drawer } from 'vaul'
 import { CategoryCombobox, type Category } from './CategoryCombobox'
+import { ProjectCombobox, type Project } from './ProjectCombobox'
 
 type TransactionRow = {
   id: string
@@ -13,11 +14,13 @@ type TransactionRow = {
   raw_concept: string | null
   description: string | null
   category_id: string | null
+  project_id: string | null
 }
 
 interface Props {
   transaction: TransactionRow | null
   categories: Category[]
+  projects: Project[]
   onClose: () => void
 }
 
@@ -62,13 +65,15 @@ function GhostField({ label }: { label: string }) {
   )
 }
 
-export function CategorizationDrawer({ transaction, categories, onClose }: Props) {
+export function CategorizationDrawer({ transaction, categories, projects, onClose }: Props) {
   const isOpen = transaction !== null
   const [categoryId, setCategoryId] = useState<string | null>(transaction?.category_id ?? null)
+  const [projectId, setProjectId] = useState<string | null>(transaction?.project_id ?? null)
   const categoryWrapperRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setCategoryId(transaction?.category_id ?? null)
+    setProjectId(transaction?.project_id ?? null)
   }, [transaction?.id])
 
   // Focus trigger del combobox al abrir
@@ -257,7 +262,16 @@ export function CategorizationDrawer({ transaction, categories, onClose }: Props
               </div>
             </div>
 
-            <GhostField label="Proyecto" />
+            {/* Proyecto */}
+            <div>
+              <FieldLabel>Proyecto</FieldLabel>
+              <ProjectCombobox
+                projects={projects}
+                value={projectId}
+                onChange={setProjectId}
+              />
+            </div>
+
             <GhostField label="Naturaleza" />
             <GhostField label="Titular" />
             <GhostField label="Reembolsable Nordex" />
