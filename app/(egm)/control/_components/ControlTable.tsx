@@ -1,3 +1,4 @@
+'use client'
 import { fmtDate, fmtAmount } from '../../_lib/formatters'
 
 interface Category {
@@ -7,12 +8,16 @@ interface Category {
   parent_id: string | null
 }
 
-interface Row {
+export interface Row {
   id: string
   date: string
   description: string | null
+  counterparty: string | null
+  raw_concept: string | null
   amount: number
   currency: string
+  category_id: string | null
+  project_id: string | null
   nature: string | null
   titular: string | null
   is_reimbursable: boolean | null
@@ -23,6 +28,8 @@ interface Row {
 
 interface Props {
   rows: Row[]
+  onRowClick?: (row: Row) => void
+  removedIds?: Set<string>
 }
 
 function CategoryCell({ cat }: { cat: Category | null }) {
@@ -57,7 +64,7 @@ const COL_STYLES: React.CSSProperties[] = [
 
 const HEADERS = ['FECHA', 'DESCRIPCIÓN', 'CUENTA', 'TITULAR', 'CATEGORÍA', 'MONTO']
 
-export function ControlTable({ rows }: Props) {
+export function ControlTable({ rows, onRowClick, removedIds }: Props) {
   return (
     <div style={{ marginBottom: 24 }}>
       {/* Header */}
@@ -72,9 +79,17 @@ export function ControlTable({ rows }: Props) {
       </div>
 
       {/* Rows */}
-      {rows.map((row) => (
+      {rows.map((row) => {
+        const isRemoving = removedIds?.has(row.id) ?? false
+        return (
         <div
           key={row.id}
+          onClick={onRowClick && !isRemoving ? () => onRowClick(row) : undefined}
+          aria-hidden={isRemoving || undefined}
+          className={[
+            onRowClick ? 'egm-row-clickable' : '',
+            isRemoving ? 'egm-row-removing' : '',
+          ].filter(Boolean).join(' ') || undefined}
           style={{
             display: 'flex', gap: 16, alignItems: 'center',
             padding: '14px 0',
@@ -94,9 +109,10 @@ export function ControlTable({ rows }: Props) {
             }}>
               {row.description ?? '—'}
             </div>
-            {row.accounts && (
-              <div className="roman" style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
-                {row.accounts.institution} · {row.accounts.name}
+            {row.counterparty && row.counterparty !== row.description && (
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {row.counterparty}
               </div>
             )}
           </div>
@@ -126,7 +142,7 @@ export function ControlTable({ rows }: Props) {
             {fmtAmount(row.amount, row.currency)}
           </div>
         </div>
-      ))}
+      )})}
     </div>
   )
 }
