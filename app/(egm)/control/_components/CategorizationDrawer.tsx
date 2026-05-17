@@ -5,6 +5,8 @@ import { Drawer } from 'vaul'
 import { CategoryCombobox, type Category } from './CategoryCombobox'
 import { ProjectCombobox, type Project } from './ProjectCombobox'
 import { NatureSelect, type NatureValue } from './NatureSelect'
+import { TitularRadio, type TitularValue } from './TitularRadio'
+import { ReimbursableCheckbox } from './ReimbursableCheckbox'
 
 type TransactionRow = {
   id: string
@@ -17,6 +19,8 @@ type TransactionRow = {
   category_id: string | null
   project_id: string | null
   nature: string | null
+  titular: string | null
+  is_reimbursable: boolean | null
 }
 
 interface Props {
@@ -72,13 +76,22 @@ export function CategorizationDrawer({ transaction, categories, projects, onClos
   const [categoryId, setCategoryId] = useState<string | null>(transaction?.category_id ?? null)
   const [projectId, setProjectId] = useState<string | null>(transaction?.project_id ?? null)
   const [nature, setNature] = useState<NatureValue | null>((transaction?.nature as NatureValue | null) ?? null)
+  const [titular, setTitular] = useState<TitularValue>((transaction?.titular as TitularValue) ?? 'compartido')
+  const [isReimbursable, setIsReimbursable] = useState<boolean>(transaction?.is_reimbursable ?? false)
   const categoryWrapperRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setCategoryId(transaction?.category_id ?? null)
     setProjectId(transaction?.project_id ?? null)
     setNature((transaction?.nature as NatureValue | null) ?? null)
+    setTitular((transaction?.titular as TitularValue) ?? 'compartido')
+    setIsReimbursable(transaction?.is_reimbursable ?? false)
   }, [transaction?.id])
+
+  // Forzar is_reimbursable a false cuando titular cambia fuera de 'eric'
+  useEffect(() => {
+    if (titular !== 'eric' && isReimbursable) setIsReimbursable(false)
+  }, [titular])
 
   // Focus trigger del combobox al abrir
   useEffect(() => {
@@ -282,8 +295,19 @@ export function CategorizationDrawer({ transaction, categories, projects, onClos
               <NatureSelect value={nature} onChange={setNature} />
             </div>
 
-            <GhostField label="Titular" />
-            <GhostField label="Reembolsable Nordex" />
+            {/* Titular */}
+            <div>
+              <FieldLabel>Titular</FieldLabel>
+              <TitularRadio value={titular} onChange={setTitular} />
+            </div>
+
+            {/* Reembolsable Nordex */}
+            <ReimbursableCheckbox
+              checked={isReimbursable}
+              onChange={setIsReimbursable}
+              disabled={titular !== 'eric'}
+            />
+
             <GhostField label="Guardar como regla" />
           </div>
 
