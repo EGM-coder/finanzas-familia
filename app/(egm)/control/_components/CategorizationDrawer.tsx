@@ -8,7 +8,10 @@ import { toast } from 'sonner'
 import { NatureSelect, type NatureValue } from './NatureSelect'
 import { TitularRadio, type TitularValue } from './TitularRadio'
 import { ReimbursableCheckbox } from './ReimbursableCheckbox'
+import { RuleSubForm } from './RuleSubForm'
 import { updateTransaction, type UpdateTransactionPayload } from '../_actions/updateTransaction'
+import { createRule, type MatchField } from '../_actions/createRule'
+import { deleteRule } from '../_actions/deleteRule'
 
 type TransactionRow = {
   id: string
@@ -50,31 +53,6 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-function GhostField({ label }: { label: string }) {
-  return (
-    <div>
-      <FieldLabel>{label}</FieldLabel>
-      <div style={{
-        border: '1px solid var(--rule)',
-        padding: '0 14px',
-        height: 40,
-        boxSizing: 'border-box',
-        background: 'transparent',
-        fontFamily: 'var(--sans)',
-        fontSize: 12,
-        fontStyle: 'italic',
-        color: 'var(--ink-4)',
-        cursor: 'not-allowed',
-        opacity: 0.6,
-        display: 'flex',
-        alignItems: 'center',
-      }}>
-        Próximamente
-      </div>
-    </div>
-  )
-}
-
 export function CategorizationDrawer({
   transaction, categories, projects, onClose,
   onMarkRemoved, onRestoreRow,
@@ -86,6 +64,7 @@ export function CategorizationDrawer({
   const [titular, setTitular] = useState<TitularValue>((transaction?.titular as TitularValue) ?? 'compartido')
   const [isReimbursable, setIsReimbursable] = useState<boolean>(transaction?.is_reimbursable ?? false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isRuleSubFormOpen, setIsRuleSubFormOpen] = useState(false)
   const categoryWrapperRef = useRef<HTMLDivElement>(null)
   const handleSaveRef = useRef<(() => void) | undefined>(undefined)
 
@@ -95,14 +74,13 @@ export function CategorizationDrawer({
     setNature((transaction?.nature as NatureValue | null) ?? null)
     setTitular((transaction?.titular as TitularValue) ?? 'compartido')
     setIsReimbursable(transaction?.is_reimbursable ?? false)
+    setIsRuleSubFormOpen(false)
   }, [transaction?.id])
 
-  // Forzar is_reimbursable a false cuando titular cambia fuera de 'eric'
   useEffect(() => {
     if (titular !== 'eric' && isReimbursable) setIsReimbursable(false)
   }, [titular])
 
-  // Focus trigger del combobox al abrir
   useEffect(() => {
     if (!isOpen) return
     const timer = setTimeout(() => {
@@ -111,7 +89,6 @@ export function CategorizationDrawer({
     return () => clearTimeout(timer)
   }, [isOpen])
 
-  // Cmd/Ctrl+Enter
   useEffect(() => {
     if (!isOpen) return
     const handler = (e: KeyboardEvent) => {
@@ -129,27 +106,34 @@ export function CategorizationDrawer({
 
   const canSave = categoryId !== null && !isSaving
 
-  async function handleSave() {
-    if (!canSave || !transaction) return
-    setIsSaving(true)
-
-    const snapshot: UpdateTransactionPayload = {
+  function buildSnapshot(): UpdateTransactionPayload {
+    if (!transaction) throw new Error('no transaction')
+    return {
       category_id:     transaction.category_id ?? null,
       project_id:      transaction.project_id ?? null,
       nature:          (transaction.nature as NatureValue | null) ?? null,
       titular:         (transaction.titular as TitularValue) ?? 'compartido',
       is_reimbursable: transaction.is_reimbursable ?? false,
     }
+  }
 
-    const payload: UpdateTransactionPayload = {
+  function buildPayload(): UpdateTransactionPayload {
+    return {
       category_id:     categoryId,
       project_id:      projectId,
       nature,
       titular,
       is_reimbursable: isReimbursable,
     }
+  }
 
-    const result = await updateTransaction(transaction.id, payload)
+  async function handleSave() {
+    if (!canSave || !transaction) return
+    setIsSaving(true)
+
+    const snapshot = buildSnapshot()
+    const payload  = buildPayload()
+    const result   = await updateTransaction(transaction.id, payload)
     setIsSaving(false)
 
     if (!result.ok) {
@@ -183,7 +167,67 @@ export function CategorizationDrawer({
     })
   }
 
-  // Ref siempre apunta a la versión más reciente (evita closure stale en el listener)
+  async function handleCreateRuleAndSave(matchField: MatchField, matchValue: string) {
+    if (!canSave || !transaction) return
+    setIsSaving(true)
+
+    const snapshot = buildSnapshot()
+    const payload  = buildPayload()
+
+    const ruleResult = await createRule({
+      match_field:     matchField,
+      match_value:     matchValue,
+      set_category_id: categoryId,
+      set_project_id:  projectId,
+      set_nature:      nature,
+    })
+
+    if (!ruleResult.ok) {
+      setIsSaving(false)
+      toast.error(ruleResult.error)
+      return
+    }
+
+    const updateResult = await updateTransaction(transaction.id, payload)
+    setIsSaving(false)
+
+    if (!updateResult.ok) {
+      await deleteRule(ruleResult.ruleId)
+      toast.error(updateResult.error)
+      return
+    }
+
+    const txId   = transaction.id
+    const ruleId = ruleResult.ruleId
+    onMarkRemoved(txId)
+    onClose()
+
+    const tid = toast.success('Categorizada y regla creada', {
+      duration: 5000,
+      action: (
+        <button
+          type="button"
+          className="egm-toast-undo"
+          onClick={async () => {
+            toast.dismiss(tid)
+            const [undoTx, undoRule] = await Promise.all([
+              updateTransaction(txId, snapshot),
+              deleteRule(ruleId),
+            ])
+            if (undoTx.ok && undoRule.ok) {
+              onRestoreRow()
+              toast.success('Restaurada')
+            } else {
+              toast.error('No se pudo restaurar todo')
+            }
+          }}
+        >
+          Deshacer
+        </button>
+      ),
+    })
+  }
+
   handleSaveRef.current = handleSave
 
   return (
@@ -319,7 +363,6 @@ export function CategorizationDrawer({
                     return text.length > 80 ? text.slice(0, 80) + '…' : text
                   })()}
                 </div>
-
               </section>
             )}
 
@@ -364,13 +407,30 @@ export function CategorizationDrawer({
               disabled={titular !== 'eric'}
             />
 
-            <GhostField label="Guardar como regla" />
+            {/* Guardar como regla — sub-form acordeonado */}
+            <div style={{
+              overflow: 'hidden',
+              maxHeight: isRuleSubFormOpen ? '600px' : '0',
+              transition: 'max-height 200ms ease',
+            }}>
+              {transaction && (
+                <RuleSubForm
+                  transaction={transaction}
+                  categoryId={categoryId}
+                  projectId={projectId}
+                  nature={nature}
+                  onCreate={handleCreateRuleAndSave}
+                  isSaving={isSaving}
+                />
+              )}
+            </div>
           </div>
 
           {/* Footer sticky */}
           <footer style={{
             display: 'flex',
             justifyContent: 'flex-end',
+            alignItems: 'center',
             gap: 12,
             padding: '16px 24px',
             paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))',
@@ -404,6 +464,29 @@ export function CategorizationDrawer({
               }}
             >
               Cancelar
+            </button>
+            <button
+              disabled={!canSave}
+              onClick={() => setIsRuleSubFormOpen(v => !v)}
+              style={{
+                fontFamily: 'var(--sans)',
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                padding: '8px 16px',
+                background: 'transparent',
+                border: '1px solid var(--rule)',
+                borderRadius: 0,
+                color: canSave ? 'var(--ink-2)' : 'var(--ink-4)',
+                cursor: canSave ? 'pointer' : 'not-allowed',
+                opacity: canSave ? 1 : 0.4,
+                transition: 'color 150ms ease, border-color 150ms ease',
+                textDecoration: isRuleSubFormOpen ? 'underline' : 'none',
+                textUnderlineOffset: 3,
+              }}
+            >
+              {isRuleSubFormOpen ? 'Cancelar regla' : 'Guardar como regla'}
             </button>
             <button
               disabled={!canSave}
