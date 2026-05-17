@@ -160,20 +160,26 @@ export function CategorizationDrawer({
     const txId = transaction.id
     onMarkRemoved(txId)
     onClose()
-    toast.success('Categorizada', {
+    const tid = toast.success('Categorizada', {
       duration: 5000,
-      action: {
-        label: 'Deshacer',
-        onClick: async () => {
-          const undo = await updateTransaction(txId, snapshot)
-          if (undo.ok) {
-            onRestoreRow()
-            toast.success('Restaurada')
-          } else {
-            toast.error('No se pudo restaurar')
-          }
-        },
-      },
+      action: (
+        <button
+          type="button"
+          className="egm-toast-undo"
+          onClick={async () => {
+            toast.dismiss(tid)
+            const undo = await updateTransaction(txId, snapshot)
+            if (undo.ok) {
+              onRestoreRow()
+              toast.success('Restaurada')
+            } else {
+              toast.error('No se pudo restaurar')
+            }
+          }}
+        >
+          Deshacer
+        </button>
+      ),
     })
   }
 
