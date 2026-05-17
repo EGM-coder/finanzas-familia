@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Drawer } from 'vaul'
 import { CategoryCombobox, type Category } from './CategoryCombobox'
 import { ProjectCombobox, type Project } from './ProjectCombobox'
+import { NatureSelect, type NatureValue } from './NatureSelect'
 
 type TransactionRow = {
   id: string
@@ -15,6 +16,7 @@ type TransactionRow = {
   description: string | null
   category_id: string | null
   project_id: string | null
+  nature: string | null
 }
 
 interface Props {
@@ -69,11 +71,13 @@ export function CategorizationDrawer({ transaction, categories, projects, onClos
   const isOpen = transaction !== null
   const [categoryId, setCategoryId] = useState<string | null>(transaction?.category_id ?? null)
   const [projectId, setProjectId] = useState<string | null>(transaction?.project_id ?? null)
+  const [nature, setNature] = useState<NatureValue | null>((transaction?.nature as NatureValue | null) ?? null)
   const categoryWrapperRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setCategoryId(transaction?.category_id ?? null)
     setProjectId(transaction?.project_id ?? null)
+    setNature((transaction?.nature as NatureValue | null) ?? null)
   }, [transaction?.id])
 
   // Focus trigger del combobox al abrir
@@ -272,7 +276,12 @@ export function CategorizationDrawer({ transaction, categories, projects, onClos
               />
             </div>
 
-            <GhostField label="Naturaleza" />
+            {/* Naturaleza */}
+            <div>
+              <FieldLabel>Naturaleza</FieldLabel>
+              <NatureSelect value={nature} onChange={setNature} />
+            </div>
+
             <GhostField label="Titular" />
             <GhostField label="Reembolsable Nordex" />
             <GhostField label="Guardar como regla" />
