@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Drawer } from 'vaul'
 import { CategoryCombobox, type Category } from './CategoryCombobox'
 import { ProjectCombobox, type Project } from './ProjectCombobox'
@@ -28,6 +28,14 @@ type TransactionRow = {
   is_reimbursable: boolean | null
 }
 
+export type DirtySnapshot = {
+  categoryId: string | null
+  projectId: string | null
+  nature: NatureValue | null
+  titular: TitularValue
+  isReimbursable: boolean
+}
+
 interface Props {
   transaction: TransactionRow | null
   categories: Category[]
@@ -35,6 +43,9 @@ interface Props {
   onClose: () => void
   onMarkRemoved: (id: string) => void
   onRestoreRow: () => void
+  initialDirtySnapshot: DirtySnapshot | null
+  onConsumeDirtySnapshot: () => void
+  onReopenWithDirty: (txnId: string, snapshot: DirtySnapshot) => void
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -56,6 +67,7 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 export function CategorizationDrawer({
   transaction, categories, projects, onClose,
   onMarkRemoved, onRestoreRow,
+  initialDirtySnapshot, onConsumeDirtySnapshot, onReopenWithDirty,
 }: Props) {
   const isOpen = transaction !== null
   const [categoryId, setCategoryId] = useState<string | null>(transaction?.category_id ?? null)
@@ -69,17 +81,27 @@ export function CategorizationDrawer({
   const handleSaveRef = useRef<(() => void) | undefined>(undefined)
 
   useEffect(() => {
-    setCategoryId(transaction?.category_id ?? null)
-    setProjectId(transaction?.project_id ?? null)
-    setNature((transaction?.nature as NatureValue | null) ?? null)
-    setTitular((transaction?.titular as TitularValue) ?? 'compartido')
-    setIsReimbursable(transaction?.is_reimbursable ?? false)
+    if (!transaction) return
+    if (initialDirtySnapshot) {
+      setCategoryId(initialDirtySnapshot.categoryId)
+      setProjectId(initialDirtySnapshot.projectId)
+      setNature(initialDirtySnapshot.nature)
+      setTitular(initialDirtySnapshot.titular)
+      setIsReimbursable(initialDirtySnapshot.isReimbursable)
+      onConsumeDirtySnapshot()
+    } else {
+      setCategoryId(transaction.category_id ?? null)
+      setProjectId(transaction.project_id ?? null)
+      setNature((transaction.nature as NatureValue | null) ?? null)
+      setTitular((transaction.titular as TitularValue) ?? 'compartido')
+      setIsReimbursable(transaction.is_reimbursable ?? false)
+    }
     setIsRuleSubFormOpen(false)
-  }, [transaction?.id])
+  }, [transaction?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (titular !== 'eric' && isReimbursable) setIsReimbursable(false)
-  }, [titular])
+  }, [titular]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!isOpen) return
@@ -104,7 +126,47 @@ export function CategorizationDrawer({
   const fmtAmount = (n: number, cur: string) =>
     n.toLocaleString('es-ES', { style: 'currency', currency: cur || 'EUR' })
 
+  const isDirty = useMemo(() => {
+    if (!transaction) return false
+    return (
+      categoryId     !== (transaction.category_id ?? null) ||
+      projectId      !== (transaction.project_id ?? null) ||
+      nature         !== ((transaction.nature as NatureValue | null) ?? null) ||
+      titular        !== ((transaction.titular as TitularValue) ?? 'compartido') ||
+      isReimbursable !== (transaction.is_reimbursable ?? false)
+    )
+  }, [transaction, categoryId, projectId, nature, titular, isReimbursable])
+
   const canSave = categoryId !== null && !isSaving
+
+  // Cierre con dirty-check — Vaul onOpenChange + botón Cancelar
+  const handleClose = useCallback(() => {
+    if (!isDirty || !transaction) {
+      onClose()
+      return
+    }
+    const dirtySnapshot: DirtySnapshot = { categoryId, projectId, nature, titular, isReimbursable }
+    const txnId = transaction.id
+    onClose()
+    const tid = toast('Cambios descartados', {
+      duration: 3000,
+      action: (
+        <button
+          type="button"
+          className="egm-toast-undo"
+          onClick={() => {
+            toast.dismiss(tid)
+            onReopenWithDirty(txnId, dirtySnapshot)
+          }}
+        >
+          Deshacer
+        </button>
+      ),
+    })
+  }, [isDirty, transaction, categoryId, projectId, nature, titular, isReimbursable, onClose, onReopenWithDirty])
+
+  // Cierre forzado — success path de Guardar/Crear regla, omite dirty check
+  const forceClose = useCallback(() => { onClose() }, [onClose])
 
   function buildSnapshot(): UpdateTransactionPayload {
     if (!transaction) throw new Error('no transaction')
@@ -118,13 +180,7 @@ export function CategorizationDrawer({
   }
 
   function buildPayload(): UpdateTransactionPayload {
-    return {
-      category_id:     categoryId,
-      project_id:      projectId,
-      nature,
-      titular,
-      is_reimbursable: isReimbursable,
-    }
+    return { category_id: categoryId, project_id: projectId, nature, titular, is_reimbursable: isReimbursable }
   }
 
   async function handleSave() {
@@ -143,7 +199,7 @@ export function CategorizationDrawer({
 
     const txId = transaction.id
     onMarkRemoved(txId)
-    onClose()
+    forceClose()
     const tid = toast.success('Categorizada', {
       duration: 5000,
       action: (
@@ -200,7 +256,7 @@ export function CategorizationDrawer({
     const txId   = transaction.id
     const ruleId = ruleResult.ruleId
     onMarkRemoved(txId)
-    onClose()
+    forceClose()
 
     const tid = toast.success('Categorizada y regla creada', {
       duration: 5000,
@@ -234,7 +290,7 @@ export function CategorizationDrawer({
     <Drawer.Root
       direction="right"
       open={isOpen}
-      onOpenChange={(open) => { if (!open) onClose() }}
+      onOpenChange={(open) => { if (!open) handleClose() }}
     >
       <Drawer.Portal>
         <Drawer.Overlay
@@ -289,7 +345,7 @@ export function CategorizationDrawer({
                 Categorizar
               </Drawer.Title>
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 aria-label="Cerrar"
                 onMouseEnter={e => {
                   e.currentTarget.style.background = 'var(--rule)'
@@ -439,7 +495,7 @@ export function CategorizationDrawer({
             flexShrink: 0,
           }}>
             <button
-              onClick={onClose}
+              onClick={handleClose}
               onMouseEnter={e => {
                 e.currentTarget.style.borderColor = 'var(--ink-2)'
                 e.currentTarget.style.color = 'var(--ink-1)'

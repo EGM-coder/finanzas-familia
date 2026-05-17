@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ControlTable, type Row } from './ControlTable'
-import { CategorizationDrawer } from './CategorizationDrawer'
+import { CategorizationDrawer, type DirtySnapshot } from './CategorizationDrawer'
 import { type Category } from './CategoryCombobox'
 import { type Project } from './ProjectCombobox'
 
@@ -16,6 +16,7 @@ export function ControlClientShell({ rows, categories, initialProjects }: Props)
   const router = useRouter()
   const [selectedTx, setSelectedTx] = useState<Row | null>(null)
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set())
+  const [pendingDirtySnapshot, setPendingDirtySnapshot] = useState<DirtySnapshot | null>(null)
 
   useEffect(() => {
     setRemovedIds(new Set())
@@ -30,6 +31,17 @@ export function ControlClientShell({ rows, categories, initialProjects }: Props)
     router.refresh()
   }
 
+  const handleReopenWithDirty = (txnId: string, snapshot: DirtySnapshot) => {
+    const txn = rows.find(t => t.id === txnId)
+    if (!txn) return
+    setPendingDirtySnapshot(snapshot)
+    setSelectedTx(txn)
+  }
+
+  const handleConsumeDirtySnapshot = () => {
+    setPendingDirtySnapshot(null)
+  }
+
   return (
     <>
       <ControlTable rows={rows} onRowClick={setSelectedTx} removedIds={removedIds} />
@@ -40,6 +52,9 @@ export function ControlClientShell({ rows, categories, initialProjects }: Props)
         onClose={() => setSelectedTx(null)}
         onMarkRemoved={markRemoved}
         onRestoreRow={restoreRow}
+        initialDirtySnapshot={pendingDirtySnapshot}
+        onConsumeDirtySnapshot={handleConsumeDirtySnapshot}
+        onReopenWithDirty={handleReopenWithDirty}
       />
     </>
   )
