@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ControlTable, type Row } from './ControlTable'
 import { CategorizationDrawer } from './CategorizationDrawer'
@@ -17,13 +17,18 @@ export function ControlClientShell({ rows, categories, initialProjects }: Props)
   const [selectedTx, setSelectedTx] = useState<Row | null>(null)
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set())
 
-  const markRemoved = (id: string) =>
+  useEffect(() => {
+    setRemovedIds(new Set())
+  }, [rows])
+
+  const markRemoved = (id: string) => {
     setRemovedIds(prev => new Set(prev).add(id))
+    setTimeout(() => router.refresh(), 350)
+  }
 
-  const restoreRow = (id: string) =>
-    setRemovedIds(prev => { const n = new Set(prev); n.delete(id); return n })
-
-  const refreshAfterFade = () => setTimeout(() => router.refresh(), 350)
+  const restoreRow = () => {
+    router.refresh()
+  }
 
   return (
     <>
@@ -35,7 +40,6 @@ export function ControlClientShell({ rows, categories, initialProjects }: Props)
         onClose={() => setSelectedTx(null)}
         onMarkRemoved={markRemoved}
         onRestoreRow={restoreRow}
-        onRefreshAfterFade={refreshAfterFade}
       />
     </>
   )

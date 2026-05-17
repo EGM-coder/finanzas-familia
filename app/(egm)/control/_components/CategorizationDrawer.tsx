@@ -31,8 +31,7 @@ interface Props {
   projects: Project[]
   onClose: () => void
   onMarkRemoved: (id: string) => void
-  onRestoreRow: (id: string) => void
-  onRefreshAfterFade: () => void
+  onRestoreRow: () => void
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -78,7 +77,7 @@ function GhostField({ label }: { label: string }) {
 
 export function CategorizationDrawer({
   transaction, categories, projects, onClose,
-  onMarkRemoved, onRestoreRow, onRefreshAfterFade,
+  onMarkRemoved, onRestoreRow,
 }: Props) {
   const isOpen = transaction !== null
   const [categoryId, setCategoryId] = useState<string | null>(transaction?.category_id ?? null)
@@ -168,7 +167,7 @@ export function CategorizationDrawer({
         onClick: async () => {
           const undo = await updateTransaction(txId, snapshot)
           if (undo.ok) {
-            onRestoreRow(txId)
+            onRestoreRow()
             toast.success('Restaurada')
           } else {
             toast.error('No se pudo restaurar')
@@ -176,7 +175,6 @@ export function CategorizationDrawer({
         },
       },
     })
-    onRefreshAfterFade()
   }
 
   // Ref siempre apunta a la versión más reciente (evita closure stale en el listener)
