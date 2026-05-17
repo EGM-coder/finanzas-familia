@@ -1,8 +1,8 @@
 # EGMFin · Schema Reference
 
 > **Single source of truth** del schema. Generado desde `supabase/migrations/` consolidando lo que vive en el repo.
-> **Cobertura:** migraciones 01–11 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
-> **Última actualización:** 15 may 2026 — Fase 3 / Drawer pre-implementación.
+> **Cobertura:** migraciones 01–11 + 22 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
+> **Última actualización:** 17 may 2026 — mig 22 (grants transactions).
 
 ---
 
@@ -132,6 +132,8 @@ Movimientos financieros. Visibilidad heredada de `account_id`. **Sin DELETE** (i
 - `transactions_titular_date_idx` on `(titular, date DESC)`
 
 **RLS:** SELECT/INSERT/UPDATE basado en `can_see_account(account_id)`.
+
+**GRANTs (mig 22):** `authenticated` tiene `SELECT, INSERT, UPDATE`. Sin DELETE (integridad histórica). `service_role` mantiene full grants para procesos automatizados (`sync_psd2.py`).
 
 ---
 
