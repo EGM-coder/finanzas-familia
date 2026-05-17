@@ -308,24 +308,12 @@ export function CategorizationDrawer({
                   lineHeight: 1.5,
                   color: 'var(--ink-2)',
                 }}>
-                  {transaction.counterparty || transaction.description || '—'}
+                  {(() => {
+                    const text = transaction.counterparty || transaction.description || '—'
+                    return text.length > 80 ? text.slice(0, 80) + '…' : text
+                  })()}
                 </div>
 
-                {transaction.raw_concept && (
-                  <div
-                    title={transaction.raw_concept}
-                    style={{
-                      fontFamily: 'var(--mono)',
-                      fontSize: 11,
-                      color: 'var(--ink-4)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {transaction.raw_concept}
-                  </div>
-                )}
               </section>
             )}
 

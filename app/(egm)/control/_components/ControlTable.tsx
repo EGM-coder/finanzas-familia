@@ -109,9 +109,10 @@ export function ControlTable({ rows, onRowClick, removedIds }: Props) {
             }}>
               {row.description ?? '—'}
             </div>
-            {row.accounts && (
-              <div className="roman" style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
-                {row.accounts.institution} · {row.accounts.name}
+            {row.counterparty && row.counterparty !== row.description && (
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {row.counterparty}
               </div>
             )}
           </div>
