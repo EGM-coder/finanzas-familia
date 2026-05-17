@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import type { NatureValue } from './NatureSelect'
 import type { MatchField } from '../_actions/createRule'
 
@@ -18,10 +19,10 @@ interface Props {
   isSaving: boolean
 }
 
-const FIELD_OPTIONS: { value: MatchField; label: string }[] = [
-  { value: 'counterparty', label: 'Counterparty' },
-  { value: 'raw_concept',  label: 'Concepto bruto' },
-  { value: 'description',  label: 'Descripción' },
+const FIELD_OPTIONS = [
+  { value: 'counterparty' as MatchField, label: 'Counterparty' },
+  { value: 'raw_concept'  as MatchField, label: 'Concepto bruto' },
+  { value: 'description'  as MatchField, label: 'Descripción' },
 ]
 
 function getDefaultField(tx: Tx): MatchField {
@@ -30,20 +31,17 @@ function getDefaultField(tx: Tx): MatchField {
   return 'raw_concept'
 }
 
-function getTxValue(tx: Tx, field: MatchField): string {
-  return tx[field] ?? ''
-}
-
-import { useState } from 'react'
-
 export function RuleSubForm({ transaction, categoryId, onCreate, isSaving }: Props) {
-  const [matchField, setMatchField] = useState<MatchField>(() => getDefaultField(transaction))
-  const [matchValue, setMatchValue] = useState<string>(() => getTxValue(transaction, getDefaultField(transaction)))
+  const initialField = getDefaultField(transaction)
 
-  function handleFieldChange(field: MatchField) {
-    setMatchField(field)
-    setMatchValue(getTxValue(transaction, field))
-  }
+  const [matchField, setMatchField] = useState<MatchField>(initialField)
+  const [matchValue, setMatchValue] = useState<string>(
+    (transaction[initialField] as string | null) ?? ''
+  )
+
+  useEffect(() => {
+    setMatchValue((transaction[matchField] as string | null) ?? '')
+  }, [matchField, transaction])
 
   const canCreate = matchValue.trim().length > 0 && categoryId !== null && !isSaving
 
@@ -55,6 +53,7 @@ export function RuleSubForm({ transaction, categoryId, onCreate, isSaving }: Pro
       flexDirection: 'column',
       gap: 16,
     }}>
+
       {/* Label */}
       <div style={{
         fontFamily: 'var(--sans)',
@@ -68,30 +67,35 @@ export function RuleSubForm({ transaction, categoryId, onCreate, isSaving }: Pro
       </div>
 
       {/* Match field radios */}
-      <div role="radiogroup" aria-label="Campo de matching"
-        style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
+      <div
+        role="radiogroup"
+        aria-label="Campo de matching"
+        style={{ display: 'flex', gap: 24, alignItems: 'center', height: 40, marginTop: 4, marginBottom: 8 }}
+      >
         {FIELD_OPTIONS.map((opt) => {
-          const active = opt.value === matchField
+          const isActive = matchField === opt.value
           return (
             <button
               key={opt.value}
               type="button"
               role="radio"
-              aria-checked={active}
-              onClick={() => handleFieldChange(opt.value)}
-              onMouseEnter={e => { if (!active) e.currentTarget.style.color = 'var(--ink-2)' }}
-              onMouseLeave={e => { if (!active) e.currentTarget.style.color = 'var(--ink-3)' }}
+              aria-checked={isActive}
+              onClick={() => setMatchField(opt.value)}
+              onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = 'var(--ink-2)' }}
+              onMouseLeave={e => { if (!isActive) e.currentTarget.style.color = 'var(--ink-3)' }}
               style={{
-                background: 'none',
+                background: 'transparent',
                 border: 'none',
+                borderRadius: 0,
                 padding: '4px 0',
+                margin: 0,
                 fontFamily: 'var(--sans)',
                 fontSize: 14,
-                color: active ? 'var(--ink-1)' : 'var(--ink-3)',
-                textDecoration: active ? 'underline' : 'none',
+                color: isActive ? 'var(--ink-1)' : 'var(--ink-3)',
+                textDecoration: isActive ? 'underline' : 'none',
                 textUnderlineOffset: 4,
                 textDecorationThickness: 1,
-                cursor: active ? 'default' : 'pointer',
+                cursor: isActive ? 'default' : 'pointer',
                 transition: 'color 150ms ease',
                 outline: 'none',
               }}
@@ -134,7 +138,8 @@ export function RuleSubForm({ transaction, categoryId, onCreate, isSaving }: Pro
         color: 'var(--ink-3)',
         lineHeight: 1.5,
       }}>
-        Operador <code style={{ fontFamily: 'var(--mono)', fontSize: 11, fontStyle: 'normal' }}>contains</code>.{' '}
+        Operador{' '}
+        <code style={{ fontFamily: 'var(--mono)', fontSize: 11, fontStyle: 'normal' }}>contains</code>.{' '}
         Cuando una txn nueva matchee, se aplicará la categoría, proyecto y naturaleza seleccionados.
       </p>
 
@@ -142,7 +147,7 @@ export function RuleSubForm({ transaction, categoryId, onCreate, isSaving }: Pro
       <button
         type="button"
         disabled={!canCreate}
-        onClick={() => onCreate(matchField, matchValue)}
+        onClick={() => onCreate(matchField, matchValue.trim())}
         style={{
           alignSelf: 'flex-end',
           fontFamily: 'var(--sans)',
