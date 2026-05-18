@@ -1,8 +1,8 @@
 # EGMFin · Schema Reference
 
 > **Single source of truth** del schema. Generado desde `supabase/migrations/` consolidando lo que vive en el repo.
-> **Cobertura:** migraciones 01–11 + 22–24 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
-> **Última actualización:** 18 may 2026 — mig 22, 23, 24.
+> **Cobertura:** migraciones 01–11 + 22–25 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
+> **Última actualización:** 18 may 2026 — mig 22, 23, 24, 25.
 
 ---
 
@@ -69,6 +69,12 @@ Cuentas bancarias, brokers, tarjetas, tesorerías. Sin DELETE.
 - `Entre cuentas corrientes` (sort_order 1)
 - `Pago de tarjeta` (sort_order 2)
 - `Aportación cuenta de ahorro` (sort_order 3)
+
+**Categoría añadida en mig 25 · `Ingresos`** (sort_order 14, color `#4a6a4a`):
+- `Nómina` (sort_order 1)
+- `Dividendos` (sort_order 2)
+- `Reembolsos` (sort_order 3)
+- `Otros ingresos` (sort_order 4)
 
 | Columna | Tipo | Notas |
 |---|---|---|
