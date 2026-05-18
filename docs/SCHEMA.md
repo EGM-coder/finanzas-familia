@@ -1,8 +1,8 @@
 # EGMFin · Schema Reference
 
 > **Single source of truth** del schema. Generado desde `supabase/migrations/` consolidando lo que vive en el repo.
-> **Cobertura:** migraciones 01–11 + 22–25 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
-> **Última actualización:** 18 may 2026 — mig 22, 23, 24, 25.
+> **Cobertura:** migraciones 01–11 + 22–26 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
+> **Última actualización:** 18 may 2026 — mig 22, 23, 24, 25, 26.
 
 ---
 
@@ -76,6 +76,12 @@ Cuentas bancarias, brokers, tarjetas, tesorerías. Sin DELETE.
 - `Reembolsos` (sort_order 3)
 - `Otros ingresos` (sort_order 4)
 
+**Categoría añadida en mig 26 · `Inversiones`** (sort_order 15, color `#3a5d7a`):
+- `Fondos indexados` (sort_order 1)
+- `Acciones individuales` (sort_order 2)
+- `Planes de pensiones` (sort_order 3)
+- `Cripto` (sort_order 4)
+
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | uuid PK | |
@@ -97,6 +103,8 @@ Cuentas bancarias, brokers, tarjetas, tesorerías. Sin DELETE.
 ### 2.3 · `public.projects` *(mig 01)*
 
 Proyectos de gasto (rutina, maristas_adquisicion, etc.). Compartidos entre ambos usuarios.
+
+**Proyectos activos sembrados:** `rutina` (mig 06) · `maristas_adquisicion` (mig 06) · `maristas_equipamiento` (mig 06) · `capital-leo` (mig 26) · `capital-biel` (mig 26). Patrón D-009: dimensión proyecto ortogonal a categoría — permite filtrar "todas las inversiones" AND "todo lo de Leo" como ángulos independientes.
 
 | Columna | Tipo | Notas |
 |---|---|---|
