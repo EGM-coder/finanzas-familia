@@ -1,8 +1,8 @@
 # EGMFin · Schema Reference
 
 > **Single source of truth** del schema. Generado desde `supabase/migrations/` consolidando lo que vive en el repo.
-> **Cobertura:** migraciones 01–11 + 22–26 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
-> **Última actualización:** 18 may 2026 — mig 22, 23, 24, 25, 26.
+> **Cobertura:** migraciones 01–11 + 22–27 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
+> **Última actualización:** 18 may 2026 — mig 22, 23, 24, 25, 26, 27.
 
 ---
 
@@ -81,6 +81,12 @@ Cuentas bancarias, brokers, tarjetas, tesorerías. Sin DELETE.
 - `Acciones individuales` (sort_order 2)
 - `Planes de pensiones` (sort_order 3)
 - `Cripto` (sort_order 4)
+
+**Hojas añadidas en mig 27 · `Financiero e impuestos`** (ampliación, sort_order 4–7):
+- `Hipoteca` (4) — cuota mensual completa; convive con "Intereses hipoteca" (3) para quien separe la parte IRPF-deducible
+- `Letra coche` (5)
+- `IBI` (6)
+- `Otros financieros` (7)
 
 | Columna | Tipo | Notas |
 |---|---|---|
