@@ -201,6 +201,8 @@ Reglas automáticas de clasificación de transacciones importadas (PSD2 principa
 
 **GRANTs (mig 23):** `authenticated` tiene `SELECT, INSERT, UPDATE, DELETE`. Las reglas son entidades mutables sin requisito de integridad histórica. `service_role` mantiene full grants para el cron de `sync_psd2.py` (lectura masiva al aplicar reglas).
 
+**Aplicación retroactiva manual (T-007):** `egmfin-jobs/recategorize_existing.py` aplica las reglas activas a todas las txns con `category_id IS NULL`. Primera regla que matchea gana (priority ASC, created_at ASC). Sin lógica retroactiva automática.
+
 ---
 
 ### 2.7 · `public.budgets` *(mig 03)*
