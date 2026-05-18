@@ -9,6 +9,7 @@ export type NatureValue =
   | 'extraordinario'
   | 'inversion'
   | 'ahorro'
+  | 'transferencia'
 
 const NATURE_OPTIONS: { value: NatureValue; label: string }[] = [
   { value: 'fijo_recurrente',     label: 'Fijo · recurrente' },
@@ -16,6 +17,7 @@ const NATURE_OPTIONS: { value: NatureValue; label: string }[] = [
   { value: 'extraordinario',      label: 'Extraordinario' },
   { value: 'inversion',           label: 'Inversión' },
   { value: 'ahorro',              label: 'Ahorro' },
+  { value: 'transferencia',       label: 'Transferencia' },
 ]
 
 interface Props {

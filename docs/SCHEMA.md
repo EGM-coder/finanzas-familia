@@ -1,8 +1,8 @@
 # EGMFin · Schema Reference
 
 > **Single source of truth** del schema. Generado desde `supabase/migrations/` consolidando lo que vive en el repo.
-> **Cobertura:** migraciones 01–11 + 22–23 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
-> **Última actualización:** 17 may 2026 — mig 22, 23.
+> **Cobertura:** migraciones 01–11 + 22–24 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
+> **Última actualización:** 18 may 2026 — mig 22, 23, 24.
 
 ---
 
@@ -63,7 +63,12 @@ Cuentas bancarias, brokers, tarjetas, tesorerías. Sin DELETE.
 
 ### 2.2 · `public.categories` *(mig 01 + seed mig 06)*
 
-Árbol jerárquico de categorías funcionales. `parent_id` define hijos. **12 categorías padre con `color` hex sembrado (15-may-2026, DML directo)**, los hijos heredan color en frontend.
+Árbol jerárquico de categorías funcionales. `parent_id` define hijos. **12 categorías padre con `color` hex sembrado (15-may-2026, DML directo)** + **1 categoría padre vía mig 24 (18-may-2026)**; los hijos heredan color en frontend.
+
+**Categoría añadida en mig 24 · `Transferencias internas`** (sort_order 13, color `#5a5a6a`):
+- `Entre cuentas corrientes` (sort_order 1)
+- `Pago de tarjeta` (sort_order 2)
+- `Aportación cuenta de ahorro` (sort_order 3)
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -116,7 +121,7 @@ Movimientos financieros. Visibilidad heredada de `account_id`. **Sin DELETE** (i
 | `account_id` | uuid NOT NULL FK accounts(id) | |
 | `category_id` | uuid FK categories(id) | NULL = sin clasificar |
 | `project_id` | uuid FK projects(id) | NULL = rutina implícita |
-| `nature` | text CHECK | `fijo_recurrente` · `variable_recurrente` · `extraordinario` · `inversion` · `ahorro` — **OJO, no es gasto/ingreso/transfer** |
+| `nature` | text CHECK | `fijo_recurrente` · `variable_recurrente` · `extraordinario` · `inversion` · `ahorro` · **`transferencia`** *(mig 24)* — las transferencias internas no modifican patrimonio |
 | `paid_by_user_id` | uuid FK auth.users(id) | quién adelantó el pago |
 | `titular` | text NOT NULL CHECK | `eric` · `ana` · `compartido` |
 | `source` | text NOT NULL default `'manual'` CHECK | `manual` · `csv` · `psd2` · `gmail_parse` |
