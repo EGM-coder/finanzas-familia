@@ -1,8 +1,8 @@
 # EGMFin · Schema Reference
 
 > **Single source of truth** del schema. Generado desde `supabase/migrations/` consolidando lo que vive en el repo.
-> **Cobertura:** migraciones 01–11 + 22 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
-> **Última actualización:** 17 may 2026 — mig 22 (grants transactions).
+> **Cobertura:** migraciones 01–11 + 22–23 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
+> **Última actualización:** 17 may 2026 — mig 22, 23.
 
 ---
 
@@ -171,6 +171,8 @@ Reglas automáticas de clasificación de transacciones importadas (PSD2 principa
 **OJO — no existe `set_is_reimbursable`:** si una regla debe marcar reembolsable, requiere nueva DDL en migración futura.
 
 **RLS:** abierto a cualquier autenticado.
+
+**GRANTs (mig 23):** `authenticated` tiene `SELECT, INSERT, UPDATE, DELETE`. Las reglas son entidades mutables sin requisito de integridad histórica. `service_role` mantiene full grants para el cron de `sync_psd2.py` (lectura masiva al aplicar reglas).
 
 ---
 
