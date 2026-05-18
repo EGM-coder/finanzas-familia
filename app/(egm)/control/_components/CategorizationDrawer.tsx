@@ -325,6 +325,7 @@ export function CategorizationDrawer({
           {/* Zona scrollable */}
           <div style={{
             flex: 1,
+            minHeight: 0,
             overflowY: 'auto',
             padding: '32px 24px 24px',
             display: 'flex',
@@ -463,23 +464,17 @@ export function CategorizationDrawer({
               disabled={titular !== 'eric'}
             />
 
-            {/* Guardar como regla — sub-form acordeonado */}
-            <div style={{
-              overflow: 'hidden',
-              maxHeight: isRuleSubFormOpen ? '600px' : '0',
-              transition: 'max-height 200ms ease',
-            }}>
-              {transaction && (
-                <RuleSubForm
-                  transaction={transaction}
-                  categoryId={categoryId}
-                  projectId={projectId}
-                  nature={nature}
-                  onCreate={handleCreateRuleAndSave}
-                  isSaving={isSaving}
-                />
-              )}
-            </div>
+            {/* Guardar como regla — sub-form (render condicional) */}
+            {isRuleSubFormOpen && transaction && (
+              <RuleSubForm
+                transaction={transaction}
+                categoryId={categoryId}
+                projectId={projectId}
+                nature={nature}
+                onCreate={handleCreateRuleAndSave}
+                isSaving={isSaving}
+              />
+            )}
           </div>
 
           {/* Footer sticky */}
