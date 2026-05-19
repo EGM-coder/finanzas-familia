@@ -1,8 +1,8 @@
 # EGMFin · Schema Reference
 
 > **Single source of truth** del schema. Generado desde `supabase/migrations/` consolidando lo que vive en el repo.
-> **Cobertura:** migraciones 01–11 + 22–28 (presentes en el repo). **TODO:** migraciones 12–21 mencionadas en `EGMFin_Estado_04may2026.md` y siguientes — completar con sus DDL reales en una sesión de mantenimiento.
-> **Última actualización:** 18 may 2026 — mig 22, 23, 24, 25, 26, 27, 28.
+> **Cobertura:** migraciones 01–28.
+> **Última actualización:** 19 may 2026 — T-006 · migs 11–25 documentadas.
 
 ---
 
@@ -151,12 +151,15 @@ Movimientos financieros. Visibilidad heredada de `account_id`. **Sin DELETE** (i
 | `counterparty` | text | comercio / remitente |
 | **`is_reimbursable`** | bool NOT NULL default `false` | *(mig 07)* gasto reembolsable (dietas Nordex, etc.) |
 | **`reimbursed_at`** | timestamptz | *(mig 07)* fecha efectiva de reembolso (NULL = pendiente/no aplica) |
+| **`bank_connection_id`** | uuid FK bank_connections(id) ON DELETE SET NULL | *(mig 22 psd2)* consent que originó la txn. NULL para txns no-PSD2 |
+| **`external_id`** | text | *(mig 22 psd2)* `entry_reference` de Enable Banking. Clave de idempotencia |
 
 **Índices:**
 - `transactions_date_idx` on `(date DESC)`
 - `transactions_account_date_idx` on `(account_id, date DESC)`
 - `transactions_category_idx` on `(category_id)`
 - `transactions_titular_date_idx` on `(titular, date DESC)`
+- `transactions_external_id_unique` UNIQUE PARTIAL on `(account_id, external_id) WHERE external_id IS NOT NULL`
 
 **RLS:** SELECT/INSERT/UPDATE basado en `can_see_account(account_id)`.
 
@@ -179,7 +182,7 @@ Divide una transacción entre múltiples categorías/proyectos. ON DELETE CASCAD
 
 ---
 
-### 2.6 · `public.classification_rules` *(mig 02)*
+### 2.6 · `public.classification_rules` *(mig 02 + 25)*
 
 Reglas automáticas de clasificación de transacciones importadas (PSD2 principalmente). Compartidas entre usuarios. Prioridad numérica (menor = antes).
 
@@ -193,9 +196,13 @@ Reglas automáticas de clasificación de transacciones importadas (PSD2 principa
 | `set_category_id` | uuid FK categories(id) ON DELETE SET NULL | |
 | `set_project_id` | uuid FK projects(id) ON DELETE SET NULL | |
 | `set_nature` | text CHECK | mismos valores que `transactions.nature` |
+| **`set_account_id`** | uuid FK accounts(id) ON DELETE SET NULL | *(mig 25)* remap de cuenta destino (re-routing tarjetas PSD2) |
+| **`set_titular`** | text CHECK | *(mig 25)* `eric` · `ana` · `compartido` |
+| **`set_paid_by_user_id`** | uuid FK auth.users(id) ON DELETE SET NULL | *(mig 25)* quién adelantó el pago |
+| **`set_is_reimbursable`** | boolean | *(mig 25)* marcar como reembolsable |
 | `is_active` | bool NOT NULL default `true` | |
 
-**OJO — no existe `set_is_reimbursable`:** si una regla debe marcar reembolsable, requiere nueva DDL en migración futura.
+**Campos D-005** (`set_account_id`, `set_titular`, `set_paid_by_user_id`, `set_is_reimbursable`): diseñados para re-routing automático de tarjetas en `sync_psd2.py`. El script `recategorize_existing.py` (T-007) los omite en V1 — deuda T-018.
 
 **RLS:** abierto a cualquier autenticado.
 
@@ -292,7 +299,7 @@ Activos patrimoniales (inmuebles, vehículos, otros). Visibilidad tri-state.
 
 ### 2.12 · `public.stock_option_grants` *(mig 05) — ⚠️ OBSOLETA*
 
-**Tabla eliminada en recovery del 30-abr-2026 (parche P-010).** Sustituida por `public.stock_options` (mig 16, *pendiente de documentar en este SCHEMA.md*) + vista `stock_options_valued`. No referenciar en código nuevo.
+**Tabla eliminada en recovery del 30-abr-2026 (parche P-010).** Sustituida por `public.stock_options` (mig 16) + vista `stock_options_valued`. No referenciar en código nuevo.
 
 ---
 
@@ -393,7 +400,7 @@ Cache de precios actualizados desde Yahoo Finance (cron `update_prices.py`). UNI
 
 ---
 
-### 2.18 · `public.currency_rates` *(mig 11)*
+### 2.18 · `public.currency_rates` *(mig 13)*
 
 Tipos de cambio diarios consolidados a EUR. UNIQUE `(date, from_currency, to_currency)`.
 
@@ -410,6 +417,137 @@ Tipos de cambio diarios consolidados a EUR. UNIQUE `(date, from_currency, to_cur
 
 ---
 
+### 2.19 · `public.stock_options` *(mig 16)*
+
+Paquetes de stock options Nordex. Sustituye a `stock_option_grants` (obsoleta). Sin DELETE — `is_active = false` para desactivar.
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | |
+| `package_name` | text NOT NULL | |
+| `ticker` | text NOT NULL | `NDX1.DE` |
+| `num_options` | int NOT NULL CHECK > 0 | |
+| `strike_price` | numeric(12,4) NOT NULL | |
+| `currency` | text NOT NULL default `'EUR'` | |
+| `granted_date` | date | |
+| `vesting_date` | date NOT NULL | |
+| `exercise_window_start` / `exercise_window_end` | date NOT NULL | ventana de ejercicio |
+| `condition_pct` | numeric(5,2) default `15.00` | precio >= strike × (1 + pct/100) para condición |
+| `notes` | text | |
+| `is_active` | bool NOT NULL default `true` | |
+
+**Datos sembrados en mig 16:** Package 1 (1.000 opciones, strike 11,60 €, vesting 2028, ejercitable 2029–2030) · Package 2 (1.000 opciones, strike 26,31 €, vesting 2029, ejercitable 2030–2031). Precio inicial NDX1.DE 45,28 € insertado en `holding_prices`.
+
+**RLS:** SELECT/INSERT/UPDATE/DELETE para cualquier `authenticated` (policy sin filtro de usuario — datos Eric, acceso compartido en V1).
+
+---
+
+### 2.20 · `public.manual_holdings` + `manual_holdings_history` *(mig 20)*
+
+Activos sin cotización pública gestionados manualmente (roboadvisors, fondos privados, planes). Reemplaza el parche P-001.
+
+**`public.manual_holdings`**
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | |
+| `account_id` | uuid NOT NULL FK accounts(id) ON DELETE CASCADE | |
+| `name` | text NOT NULL | |
+| `asset_type` | text NOT NULL default `'roboadvisor'` CHECK | `roboadvisor` · `fondo_privado` · `plan_pensiones` · `otro` |
+| `current_value_eur` | numeric(20,8) NOT NULL | actualizado manualmente |
+| `last_update_date` | date NOT NULL default `CURRENT_DATE` | |
+| `update_frequency` | text NOT NULL default `'mensual'` CHECK | `mensual` · `trimestral` · `anual` |
+| `notes` | text | |
+| `is_active` | bool NOT NULL default `true` | |
+
+**Trigger:** `trg_manual_holdings_snapshot` (AFTER INSERT/UPDATE) → inserta fila en `manual_holdings_history` si `current_value_eur` cambió; ON CONFLICT (manual_holding_id, snapshot_date) DO UPDATE.
+
+**`public.manual_holdings_history`**
+
+| Columna | Tipo |
+|---|---|
+| `id` | uuid PK |
+| `manual_holding_id` | uuid NOT NULL FK manual_holdings(id) ON DELETE CASCADE |
+| `value_eur` | numeric(20,8) NOT NULL |
+| `snapshot_date` | date NOT NULL |
+
+UNIQUE `(manual_holding_id, snapshot_date)`.
+
+**RLS (ambas tablas):** SELECT/INSERT/UPDATE/DELETE para cualquier `authenticated`.
+
+**Índices:** `idx_manual_holdings_account` on `(account_id)` · `idx_mh_history_holding` on `(manual_holding_id, snapshot_date DESC)`.
+
+---
+
+### 2.21 · `public.patrimonio_snapshots` *(mig 21)*
+
+Histórico puntual del patrimonio neto. PK = `snapshot_date` (un snapshot por día, upsertable). Llamar `capture_patrimonio_snapshot()` manualmente o desde frontend para grabar el estado actual.
+
+| Columna | Tipo |
+|---|---|
+| `snapshot_date` | date PK |
+| `liquidos_y_holdings` | numeric(14,2) NOT NULL |
+| `inmuebles` | numeric(14,2) NOT NULL |
+| `activos_total` | numeric(14,2) NOT NULL |
+| `deudas_activas` | numeric(14,2) NOT NULL |
+| `deudas_proyectadas` | numeric(14,2) NOT NULL |
+| `patrimonio_neto_actual` | numeric(14,2) NOT NULL |
+| `patrimonio_neto_si_firmara_hoy` | numeric(14,2) NOT NULL |
+| `stock_options_intrinsic` | numeric(14,2) NOT NULL |
+| `created_at` | timestamptz NOT NULL |
+
+**Función:** `capture_patrimonio_snapshot()` SECURITY DEFINER — lee `patrimonio_neto` (vista) y hace upsert ON CONFLICT (snapshot_date) DO UPDATE. `GRANT EXECUTE TO authenticated`.
+
+**RLS:** SELECT/INSERT/UPDATE para cualquier autenticado.
+
+---
+
+### 2.22 · `public.bank_connections` *(mig 22, psd2_enable_banking)*
+
+Consents PSD2 activos vía Enable Banking. Una fila por institución por usuario. Flujo: INSERT con `status='pending'` y `auth_state` generado → POST /auth → callback con code → POST /sessions → UPDATE `status='active'`, `consent_session_id`, `consent_valid_until` (típicamente +180d). Re-auth necesaria al expirar.
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | |
+| `provider` | text NOT NULL CHECK | `enable_banking` |
+| `aspsp_name` | text NOT NULL | nombre institución (ej. `Kutxabank`) |
+| `aspsp_country` | char(2) NOT NULL | código ISO país |
+| `aspsp_psu_type` | text NOT NULL default `'personal'` CHECK | `personal` · `business` |
+| `auth_state` | uuid | estado OAuth generado al iniciar flujo |
+| `consent_session_id` | text UNIQUE | id devuelto por Enable Banking al completar |
+| `consent_valid_until` | timestamptz | expiración del consent |
+| `user_id` | uuid NOT NULL FK auth.users(id) ON DELETE RESTRICT | propietario del consent |
+| `status` | text NOT NULL default `'pending'` CHECK | `pending` · `active` · `expired` · `revoked` |
+| `raw_session` | jsonb | respuesta cruda de POST /sessions |
+
+**RLS:** SELECT/INSERT/UPDATE/DELETE filtrados por `user_id = auth.uid()`.
+
+**GRANTs:** INSERT, UPDATE (mig 23, psd2) · DELETE + policy DELETE (mig 24, psd2) para `authenticated`.
+
+---
+
+### 2.23 · `public.bank_account_links` *(mig 22, psd2_enable_banking)*
+
+Mapping entre cuentas lógicas EGMFin (`accounts`) y cuentas físicas Enable Banking. `external_account_uid` es el uid devuelto por POST /sessions en `accounts[]` — NO es el IBAN.
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | |
+| `account_id` | uuid NOT NULL FK accounts(id) ON DELETE RESTRICT | cuenta lógica EGMFin |
+| `bank_connection_id` | uuid NOT NULL FK bank_connections(id) ON DELETE CASCADE | |
+| `external_account_uid` | text NOT NULL | uid Enable Banking |
+| `external_iban` | text | IBAN de la cuenta física |
+| `is_active` | bool NOT NULL default `true` | |
+| `last_sync_at` | timestamptz | última sincronización exitosa |
+
+UNIQUE `(bank_connection_id, external_account_uid)`.
+
+**RLS:** SELECT/INSERT/UPDATE/DELETE filtrados por `can_see_account(account_id)`.
+
+**GRANTs:** INSERT, UPDATE (mig 23, psd2) · DELETE + policy DELETE (mig 24, psd2) para `authenticated`.
+
+---
+
 ## 3 · Vistas
 
 ### `public.account_balances` *(mig 09)*
@@ -422,44 +560,103 @@ account_id | current_balance
 
 `security_invoker = true` — respeta RLS del usuario.
 
-### `public.account_balances_full` *(mig 10)*
+### `public.account_balances_full` *(mig 11, evolución migs 14 · 17 · 19 · 20)*
 
-Saldo extendido. Para cuentas `broker` / `investment` añade `holdings_value_eur`:
+Saldo extendido por cuenta. Evolución: mig 11 (v1 inicial) → mig 14 (fix signo tarjetas: `type='card'` multiplica saldo por -1) → mig 17 (añade `is_active`, `sort_order`) → mig 19 (recreada por cascade de holdings_valued) → mig 20 (suma `manual_holdings` a `holdings_value_eur`).
+
+Estado final (mig 20):
 
 ```
 id, name, institution, type, visibility, linked_account_id, initial_balance,
-transactions_sum, holdings_value_eur, current_balance
+is_active, sort_order, transactions_sum, holdings_value_eur, current_balance
 ```
 
-**TODO:** mig 17 expone `is_active` y `sort_order`. Actualizar este SCHEMA.md cuando se documente.
+`holdings_value_eur` = suma de `holdings_valued` + `manual_holdings` (is_active=true). `security_invoker = true`.
 
-### `public.holdings_valued` *(mig 10, refactor mig 19)*
+### `public.patrimonio_neto` *(mig 12, evolución migs 14 · 15 · 16 · 17 · 19 · 20)*
 
-Une `holdings` con el último precio de `holding_prices` vía `LATERAL`. Match: ticker + isin con `IS NOT DISTINCT FROM`. **Mig 19 prioriza match por ticker antes que ISIN.**
+Vista agregada del patrimonio familiar. Recreada en cascada cada vez que `account_balances_full` cambia. Desde mig 16 incluye `stock_options_intrinsic`.
+
+```
+liquidos_y_holdings, inmuebles, activos_total,
+deudas_activas, deudas_proyectadas,
+patrimonio_neto_actual, patrimonio_neto_si_firmara_hoy,
+stock_options_intrinsic
+```
+
+`deudas_activas` = liabilities con `status='activa'`. `deudas_proyectadas` = `status='proyectada'` (hipoteca Maristas antes de firmar escritura). `security_invoker = true`.
+
+### `public.holdings_valued` *(mig 10, evolución migs 15 · 19 · 20)*
+
+Une `holdings` con el último precio de `holding_prices` vía `LATERAL`. Evolución: mig 10 (v1, match ticker+isin IS NOT DISTINCT FROM) → mig 15 (añade fallback a `avg_price_eur` para roboadvisors sin cotización) → mig 19 (prioriza match por ticker; ISIN solo cuando `holding.ticker IS NULL`) → mig 20 (elimina fallback `avg_price_eur`; roboadvisors migrados a `manual_holdings`).
+
+Estado final (mig 20): sin fallback a `avg_price_eur`. `current_value_eur` = NULL si no hay precio cotizado.
 
 ```
 holdings.*, current_price_original, current_price_eur, price_date, current_value_eur
 ```
 
+`security_invoker = true`.
+
+### `public.stock_options_valued` *(mig 16)*
+
+Une `stock_options` (is_active=true) con el último precio de `holding_prices` por ticker. Calcula valor intrínseco y condición de ejercicio.
+
+```
+stock_options.*, current_price_eur, price_date,
+intrinsic_per_option, intrinsic_total,
+condition_min_price, condition_met, vested, exercisable_now
+```
+
+`intrinsic_per_option = GREATEST(0, close_eur - strike_price)`. `exercisable_now = vested AND dentro ventana AND condition_met`. `security_invoker = true`.
+
+### `public.patrimonio_snapshot_with_delta` *(mig 21)*
+
+Compara el snapshot más reciente con el snapshot de hace ~30 días. Lectura directa de `patrimonio_snapshots`.
+
+```
+snapshot_date, patrimonio_neto_actual, patrimonio_neto_si_firmara_hoy,
+liquidos_y_holdings, inmuebles, activos_total, deudas_activas, deudas_proyectadas,
+stock_options_intrinsic, ref_date,
+delta_neto_actual, delta_neto_si_firmara, delta_liquidos, delta_stock_options,
+delta_neto_actual_pct, delta_stock_options_pct, minutes_since_capture
+```
+
 ---
 
-## 4 · ⚠️ Pendiente de documentar (migraciones 12–21)
+## 4 · Notas históricas de migraciones
 
-Conocidas por `EGMFin_Estado_04may2026.md` y siguientes. Cuando se incorpore una sesión de mantenimiento, completar esta sección con DDL real leído de `supabase/migrations/`.
+### Migraciones de refactor (migs 14–20): recreaciones en cascada
 
-| Mig | Nombre | Resumen funcional |
+Las vistas `holdings_valued`, `account_balances_full` y `patrimonio_neto` están fuertemente acopladas. Cualquier cambio a una requiere DROP CASCADE y recreación de todas en orden inverso. Patrón aplicado en cada mig de refactor: DROP `patrimonio_neto` → DROP `account_balances_full` → DROP `holdings_valued` → recrear con la nueva lógica.
+
+| Mig | Archivo | Cambio neto |
 |---|---|---|
-| 12 | `patrimonio_neto.sql` | Vista `patrimonio_neto` agregada + asset Maristas (143.370€) |
-| 14 | `card_balance_sign.sql` | Tarjetas crédito invierten signo de `amount` en balances |
-| 15 | `holdings_valued_fallback.sql` | Parche temporal (eliminado en mig 20) |
-| 16 | `stock_options.sql` | **Tabla `stock_options` + vista `stock_options_valued`** + recreación `patrimonio_neto`. Sustituye `stock_option_grants` (obsoleta, P-010). |
-| 17 | `expose_is_active_sort_order.sql` | `account_balances_full` expone `is_active` y `sort_order` |
-| 18 | `unique_prices_robust.sql` | UNIQUE robusto NULL-safe en `holding_prices` (COALESCE) |
-| 19 | `holdings_valued_match_by_ticker.sql` | `holdings_valued` prioriza match por ticker; ISIN fallback |
-| 20 | `manual_holdings.sql` | Tabla `manual_holdings` + histórico + trigger snapshot. Elimina parche P-001. |
-| 21 | `patrimonio_snapshots.sql` | Tabla `patrimonio_snapshots` + función `capture_patrimonio_snapshot()` (SECURITY DEFINER) + vista `patrimonio_snapshot_with_delta` |
+| 14 | `card_balance_sign.sql` | `account_balances_full`: `type='card'` multiplica saldo por -1 |
+| 15 | `holdings_valued_fallback.sql` | `holdings_valued`: añade fallback a `avg_price_eur` (roboadvisors sin cotización) |
+| 17 | `abf_add_is_active_sort_order.sql` | `account_balances_full`: expone `is_active` y `sort_order` de `accounts` |
+| 18 | `unique_prices_robust.sql` | `holding_prices`: reemplaza UNIQUE(ticker,isin,date) por índice COALESCE NULL-safe; limpia duplicados previos |
+| 19 | `holdings_valued_match_by_ticker.sql` | `holdings_valued`: prioriza match por ticker; ISIN solo cuando `holding.ticker IS NULL` |
+| 20 | `manual_holdings.sql` | `account_balances_full`: suma `manual_holdings` a `holdings_value_eur`; `holdings_valued`: elimina fallback `avg_price_eur` |
 
-**Mig 6** (`seed_categories.sql`) y **mig 13** no aparecen en mi visión actual — el primero es seed (DML) que no genera DDL, el segundo posiblemente fue saltado o consolidado en otro.
+### Mig 06 (`seed_categories.sql`)
+
+DML puro (INSERT). No genera DDL. Siembra categorías base y proyectos iniciales (`rutina`, `maristas_adquisicion`, `maristas_equipamiento`).
+
+### Numeración corta colisionada (migs 22–25)
+
+El repo tiene dos grupos de migraciones con número corto 22–25 (PSD2 de abril–mayo y Fase 3 de mayo). En este documento se referencia con sufijo entre paréntesis cuando hay ambigüedad.
+
+| Timestamp | Archivo | Descripción |
+|---|---|---|
+| 20260430000022 | `psd2_enable_banking.sql` | mig 22 (psd2) — tablas PSD2 + columnas en transactions |
+| 20260506000023 | `psd2_grants.sql` | mig 23 (psd2) — INSERT/UPDATE en bank_connections/links |
+| 20260506000024 | `psd2_delete_grants.sql` | mig 24 (psd2) — DELETE + policies DELETE en bank_connections/links |
+| 20260514000025 | `extend_classification_rules.sql` | mig 25 (D-005) — campos set_* en classification_rules |
+| 20260517000022 | `grants_transactions_authenticated.sql` | mig 22 (Fase 3) — INSERT/UPDATE en transactions |
+| 20260517000023 | `grants_classification_rules_authenticated.sql` | mig 23 (Fase 3) — INSERT/UPDATE/DELETE en classification_rules |
+| 20260518000024 | `t013_transferencias_internas.sql` | mig 24 (Fase 3) — nature 'transferencia' + categoría |
+| 20260518000025 | `t014_categoria_ingresos.sql` | mig 25 (Fase 3) — categoría Ingresos |
 
 ---
 
