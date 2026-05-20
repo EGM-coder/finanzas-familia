@@ -1,8 +1,8 @@
 # EGMFin · Schema Reference
 
 > **Single source of truth** del schema. Generado desde `supabase/migrations/` consolidando lo que vive en el repo.
-> **Cobertura:** migraciones 01–28.
-> **Última actualización:** 19 may 2026 — T-006 · migs 11–25 documentadas.
+> **Cobertura:** migraciones 01–29.
+> **Última actualización:** 20 may 2026 — mig 29 · vistas SQL agregadas Fase 4.
 
 ---
 
@@ -621,6 +621,61 @@ stock_options_intrinsic, ref_date,
 delta_neto_actual, delta_neto_si_firmara, delta_liquidos, delta_stock_options,
 delta_neto_actual_pct, delta_stock_options_pct, minutes_since_capture
 ```
+
+### `public.v_spent_by_category_month` *(mig 29)*
+
+Gasto real por `(year, month, category_id, visibility)`. Contrato de lectura principal de Fase 4.
+
+**Splits-first:** si la txn tiene splits → agrega por `transaction_splits.(category_id, amount)`; si no → por `transactions.(category_id, amount)`. Implementado con `UNION ALL + NOT EXISTS`.
+
+**Filtro:** `amount < 0` (gastos únicamente) · `nature IS DISTINCT FROM 'transferencia'` (excluye transferencias internas; permite `nature IS NULL`).
+
+```
+year, month, category_id, visibility, spent, txn_count
+```
+
+`spent` = `ABS(SUM(amount))` — valor positivo. `security_invoker = true`.
+
+### `public.v_spent_by_category_week` *(mig 29)*
+
+Mismo patrón que `v_spent_by_category_month` pero agrupado por semana ISO.
+
+```
+week_start, category_id, visibility, spent, txn_count
+```
+
+`week_start` = lunes ISO (`date_trunc('week', date::timestamp)::date`). `security_invoker = true`.
+
+### `public.v_category_budget_status` *(mig 29)*
+
+Join `FULL OUTER` entre `budgets` y `v_spent_by_category_month`. Devuelve categorías con budget, con gasto, o ambos. Con `budgets` vacía devuelve solo filas de gasto con `semaforo='sin_budget'`.
+
+```
+year, month, category_id, visibility,
+amount_planned, spent, remaining, pct_used, semaforo, txn_count
+```
+
+`semaforo`: `verde` (≤ 90%) · `ambar` (90–100%) · `rojo` (> 100%) · `sin_budget` (sin presupuesto asignado). `security_invoker = true`.
+
+### `public.v_median_spend_3m_by_category` *(mig 29)*
+
+Mediana de gasto mensual por `(category_id, visibility)` sobre los 3 meses completos anteriores al mes actual. Usado por el Planner ZBB como sugerencia por categoría.
+
+```
+category_id, visibility, median_spent, months_with_data
+```
+
+`months_with_data < 3` → frontend usa fallback 0 con copy editorial *"Aún sin histórico suficiente. Decide tú."* Sin zero-fill: meses sin gasto en esa categoría no generan fila. Hereda filtro de transferencias vía `v_spent_by_category_month`. `security_invoker = true`.
+
+### `public.v_median_income_3m` *(mig 29)*
+
+Mediana de ingreso neto mensual por `user_id` sobre los 3 meses completos anteriores al actual. RLS de `incomes` (estricta por `user_id`) aplica vía `security_invoker`: cada usuario solo ve sus propios datos.
+
+```
+user_id, median_monthly_income, months_with_data
+```
+
+Usado por el Planner ZBB para ingreso esperado en scope personal. Scope compartido → valor manual en `localStorage` hasta Configuración (Fase 5). `security_invoker = true`.
 
 ---
 
