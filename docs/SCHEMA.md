@@ -610,9 +610,11 @@ condition_min_price, condition_met, vested, exercisable_now
 
 `intrinsic_per_option = GREATEST(0, close_eur - strike_price)`. `exercisable_now = vested AND dentro ventana AND condition_met`. `security_invoker = true`.
 
-### `public.patrimonio_snapshot_with_delta` *(mig 21)*
+### `public.patrimonio_snapshot_with_delta` *(mig 21 · security_invoker mig 33)*
 
 Compara el snapshot más reciente con el snapshot de hace ~30 días. Lectura directa de `patrimonio_snapshots`.
+
+`security_invoker = true` desde **mig 33** (cierra exposición a `anon`: sin JWT, la RLS de `patrimonio_snapshots` filtra todas las filas).
 
 ```
 snapshot_date, patrimonio_neto_actual, patrimonio_neto_si_firmara_hoy,
