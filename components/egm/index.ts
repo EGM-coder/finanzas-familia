@@ -1,3 +1,4 @@
+export { AvatarChip } from './AvatarChip';
 export { default as Hairline } from './Hairline';
 export { default as Label } from './Label';
 export { default as Num } from './Num';
