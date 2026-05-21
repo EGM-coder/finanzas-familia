@@ -1,8 +1,8 @@
 # EGMFin · Schema Reference
 
 > **Single source of truth** del schema. Generado desde `supabase/migrations/` consolidando lo que vive en el repo.
-> **Cobertura:** migraciones 01–29.
-> **Última actualización:** 20 may 2026 — mig 29 · vistas SQL agregadas Fase 4.
+> **Cobertura:** migraciones 01–32.
+> **Última actualización:** 20 may 2026 — mig 32 · RLS auth guard transversal.
 
 ---
 
@@ -10,8 +10,8 @@
 
 - **Sin DELETE:** archivado vía `is_active = false` o `status = 'archived'`. Integridad histórica obligatoria.
 - **Auditoría:** todas las tablas tienen `created_at` + `updated_at`, este último mantenido por el trigger `set_updated_at` antes de cada UPDATE.
-- **RLS habilitado** en todas las tablas. Patrones de policy en sección 1.
-- **Visibilidad tri-state:** `privada_eric` | `privada_ana` | `compartida`. Aplica a `accounts`, `assets`, `budgets`, `savings_goals`, `liabilities`, `categories` (cuando `is_default=false`).
+- **RLS habilitado** en todas las tablas. Patrones de policy en sección 1. Desde mig 32, todas las policies de tablas tri-state exigen `auth.uid() IS NOT NULL` además del filtro de visibility/scope: anon key no puede leer ningún dato aunque tenga GRANT por default de Supabase.
+- **Visibilidad tri-state:** `privada_eric` | `privada_ana` | `compartida`. Aplica a `accounts`, `assets`, `budgets`, `savings_goals`, `liabilities`, `categories` (cuando `is_default=false`), `weekly_closures`, `monthly_closures`.
 - **Visibilidad estricta por user_id:** `incomes`, `work_abroad_days`, `stock_option_grants` (legacy) — sólo el dueño lo ve.
 - **Visibilidad compartida (cualquier autenticado):** `projects`, `classification_rules`, `maristas_items`, `holding_prices`, `currency_rates`.
 - **Monedas:** todas las cifras de transacciones, balances y holdings en `EUR` por defecto. `currency_rates` consolidado en EUR.
@@ -25,8 +25,8 @@
 |---|---|---|---|
 | `public.user_role()` | sql · security definer · stable | `text` (`'eric'` o `'ana'`) | Lee de `public.profiles` mapeando `auth.uid()` → role. Cacheada por query. Núcleo de todas las RLS basadas en visibility. |
 | `public.set_updated_at()` | plpgsql trigger | trigger | Setea `new.updated_at = now()` antes de UPDATE. Aplicada a todas las tablas con `updated_at`. |
-| `public.can_see_account(p_account_id uuid)` | sql · security definer · stable | `boolean` | Helper RLS: ¿la sesión actual puede ver esa cuenta? Bypassa RLS de accounts para evitar recursión. |
-| `public.can_see_transaction(p_transaction_id uuid)` | sql · security definer · stable | `boolean` | Helper RLS: navega txn → account → visibility. Usado en `transaction_splits`. |
+| `public.can_see_account(p_account_id uuid)` | sql · security definer · stable | `boolean` | Helper RLS: ¿la sesión actual puede ver esa cuenta? Requiere `auth.uid() IS NOT NULL` *(guard añadido mig 32)*. Bypassa RLS de accounts para evitar recursión. |
+| `public.can_see_transaction(p_transaction_id uuid)` | sql · security definer · stable | `boolean` | Helper RLS: navega txn → account → visibility. Requiere `auth.uid() IS NOT NULL` *(guard añadido mig 32)*. Usado en `transaction_splits`. |
 
 ---
 
@@ -679,6 +679,48 @@ Usado por el Planner ZBB para ingreso esperado en scope personal. Scope comparti
 
 ---
 
+### `public.weekly_closures` *(mig 30)*
+
+Cierre semanal persistido. UNIQUE(week_start, scope). Escrita por `CloseSplashWeekly` vía UPSERT ON CONFLICT.
+
+```
+id, week_start (date lunes ISO), week_end (date domingo ISO),
+scope CHECK('privada_eric'|'privada_ana'|'compartida'),
+total_spent numeric(12,2), total_budget numeric(12,2),
+semaforo CHECK('verde'|'ambar'|'rojo'),
+top_deviations jsonb default '[]', insights jsonb default '[]',
+closed_at timestamptz, created_at, updated_at (trigger set_updated_at)
+```
+
+**Constraints:** `UNIQUE(week_start, scope)` · `CHECK(week_end = week_start + 6)` · `CHECK scope IN(...)` · `CHECK semaforo IN(...)`.
+**Índices:** `(week_start DESC)` · `(scope, week_start DESC)`.
+**RLS:** SELECT/INSERT/UPDATE si `auth.uid() IS NOT NULL AND scope IN('privada_'||user_role(), 'compartida')`. Sin DELETE.
+**GRANTs:** SELECT, INSERT, UPDATE a `authenticated`.
+
+---
+
+### `public.monthly_closures` *(mig 31)*
+
+Cierre mensual persistido. UNIQUE(year, month, scope). Escrita por `CloseSplashMonthly` vía UPSERT ON CONFLICT.
+
+```
+id, year int, month int CHECK(1..12),
+scope CHECK('privada_eric'|'privada_ana'|'compartida'),
+total_spent numeric(12,2), total_budget numeric(12,2),
+semaforo CHECK('verde'|'ambar'|'rojo'),
+top_deviations jsonb default '[]', category_breakdown jsonb default '[]',
+comparison_with_prev_month jsonb NULL (null en primer mes),
+insights jsonb default '[]',
+closed_at timestamptz, created_at, updated_at (trigger set_updated_at)
+```
+
+**Constraints:** `UNIQUE(year, month, scope)` · `CHECK month BETWEEN 1 AND 12` · `CHECK scope IN(...)` · `CHECK semaforo IN(...)`.
+**Índices:** `(year DESC, month DESC)` · `(scope, year DESC, month DESC)`.
+**RLS:** SELECT/INSERT/UPDATE si `auth.uid() IS NOT NULL AND scope IN('privada_'||user_role(), 'compartida')`. Sin DELETE.
+**GRANTs:** SELECT, INSERT, UPDATE a `authenticated`.
+
+---
+
 ## 4 · Notas históricas de migraciones
 
 ### Migraciones de refactor (migs 14–20): recreaciones en cascada
@@ -697,6 +739,22 @@ Las vistas `holdings_valued`, `account_balances_full` y `patrimonio_neto` están
 ### Mig 06 (`seed_categories.sql`)
 
 DML puro (INSERT). No genera DDL. Siembra categorías base y proyectos iniciales (`rutina`, `maristas_adquisicion`, `maristas_equipamiento`).
+
+### Mig 32 (`rls_auth_guard.sql`) — Fix de seguridad RLS transversal
+
+**Problema detectado:** la anon key (pública en el bundle del frontend) podía leer filas con `visibility/scope = 'compartida'` sin JWT autenticado, porque las policies solo filtraban por `user_role()` sin verificar existencia de sesión.
+
+**Fix:** añadido `auth.uid() IS NOT NULL AND` como guard en:
+- **8 tablas (Grupo C):** `accounts`, `assets`, `budgets`, `categories`, `liabilities`, `savings_goals`, `weekly_closures`, `monthly_closures` — policies DROP + RECREATE.
+- **2 funciones (Grupo D):** `can_see_account()` + `can_see_transaction()` — cubre `transactions`, `bank_account_links`, `holdings`, `transaction_splits` sin tocar sus policies.
+
+**No afectados:**
+- **Grupo A (13 tablas):** ya seguros por `user_id = auth.uid()`, `auth.uid() IS NOT NULL` explícito, o `auth.role() = 'authenticated'`.
+- **Grupo B (2 tablas):** `currency_rates`, `holding_prices` — cache de mercado sin datos personales, `USING(true)` intencional.
+
+Migración atómica (BEGIN/COMMIT explícito). Verificado: anon ve 0 filas tras el fix; service_role sigue viendo 25 cuentas + 170 txns sin cambio.
+
+---
 
 ### Numeración corta colisionada (migs 22–25)
 
