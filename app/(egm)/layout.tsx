@@ -7,8 +7,8 @@ export default function EgmLayout({ children }: { children: React.ReactNode }) {
     <ThemeProvider
       attribute="class"
       defaultTheme="light"
-      enableSystem={false}
-      themes={['light', 'dark']}
+      enableSystem
+      themes={['light', 'dark', 'system']}
     >
       <div className="egm min-h-screen">
         <EgmTopBar />
