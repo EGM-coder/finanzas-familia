@@ -17,6 +17,7 @@ interface Props {
   initialModo: 'todas' | 'pendientes'
   userId: string
   mes: string
+  isCurrentMonth: boolean
 }
 
 export function ControlMonthShell({
@@ -28,6 +29,7 @@ export function ControlMonthShell({
   initialModo,
   userId,
   mes,
+  isCurrentMonth,
 }: Props) {
   const router = useRouter()
   const [modo, setModo] = useState<'todas' | 'pendientes'>(initialModo)
@@ -35,9 +37,15 @@ export function ControlMonthShell({
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set())
   const [pendingDirtySnapshot, setPendingDirtySnapshot] = useState<DirtySnapshot | null>(null)
 
+  // Reset removedIds when data refreshes (router.refresh after categorization save)
   useEffect(() => {
     setRemovedIds(new Set())
   }, [rows])
+
+  // Close drawer cleanly when navigating to a different month
+  useEffect(() => {
+    setSelectedTx(null)
+  }, [mes])
 
   function handleModoChange(nuevoModo: 'todas' | 'pendientes') {
     setModo(nuevoModo)
@@ -77,6 +85,8 @@ export function ControlMonthShell({
 
       <ControlMonthLedger
         rows={rowsVisibles}
+        mes={mes}
+        isCurrentMonth={isCurrentMonth}
         onRowClick={setSelectedTx}
         removedIds={removedIds}
       />

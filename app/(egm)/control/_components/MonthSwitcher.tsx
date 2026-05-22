@@ -15,7 +15,7 @@ export function MonthSwitcher({ mes }: Props) {
   const [year, month] = mes.split('-').map(Number)
 
   function navigate(y: number, m: number) {
-    router.push(`?mes=${y}-${String(m).padStart(2, '0')}`)
+    router.push(`?mes=${y}-${String(m).padStart(2, '0')}`, { scroll: false })
   }
 
   function prev() {
