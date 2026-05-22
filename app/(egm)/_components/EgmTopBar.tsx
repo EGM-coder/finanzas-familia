@@ -12,15 +12,16 @@ export function EgmTopBar() {
   useEffect(() => {
     const supabase = createClient()
     supabase.auth.getUser().then(({ data }) => {
-      if (!data.user) return
-      setInitial(data.user.email?.charAt(0) ?? '?')
+      const user = data.user
+      if (!user) return
+      setInitial(user.email?.charAt(0) ?? '?')
       supabase
         .from('profiles')
         .select('role')
-        .eq('user_id', data.user.id)
+        .eq('user_id', user.id)
         .single()
-        .then(({ data: profile }) => {
-          if (profile?.role) setScope(profile.role)
+        .then(({ data }: { data: { role: string } | null }) => {
+          if (data?.role) setScope(data.role)
         })
     })
   }, [])
