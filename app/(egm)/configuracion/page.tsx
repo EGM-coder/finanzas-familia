@@ -6,6 +6,7 @@ import { AsesorSection } from './_components/sections/AsesorSection'
 import { TemaSection } from './_components/sections/TemaSection'
 import { TecnicosSection } from './_components/sections/TecnicosSection'
 import { FinanzasSection } from './_components/sections/FinanzasSection'
+import { CategoriasSection } from './_components/sections/CategoriasSection'
 
 interface Props {
   searchParams: Promise<{ section?: string; item?: string }>
@@ -98,13 +99,17 @@ export default async function ConfiguracionPage({ searchParams }: Props) {
   if (section === 'tema')        return <TemaSection />
   if (section === 'tecnicos')    return <TecnicosSection />
 
-  // Categorías — Paso 4
-  return (
-    <div className="fade fade-1">
-      <div className="label" style={{ marginBottom: 8 }}>Configuración</div>
-      <h2 className="display" style={{ fontSize: 36, marginTop: 4 }}>Categorías</h2>
-      <div className="rule-strong" style={{ marginTop: 20, marginBottom: 28 }} />
-      <p className="roman" style={{ fontSize: 14, color: 'var(--ink-3)' }}>En construcción.</p>
-    </div>
-  )
+  if (section === 'categorias') {
+    const { data: categories } = await supabase
+      .from('categories')
+      .select('id, name, parent_id, color, is_default, is_active, visibility, sort_order')
+      .order('is_default', { ascending: false })
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true })
+
+    return <CategoriasSection categories={categories ?? []} />
+  }
+
+  // Default fallback — perfil
+  redirect('/configuracion?section=perfil')
 }

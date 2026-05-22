@@ -2,6 +2,8 @@ export { AvatarChip } from './AvatarChip';
 export { SectionTitle } from './SectionTitle';
 export { EditorialBlock } from './EditorialBlock';
 export { ParamRow } from './ParamRow';
+export { ColorSwatch } from './ColorSwatch';
+export { ColorPicker, EGM_PALETTE } from './ColorPicker';
 export { default as Hairline } from './Hairline';
 export { default as Label } from './Label';
 export { default as Num } from './Num';
