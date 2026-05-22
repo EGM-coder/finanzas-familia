@@ -1,27 +1,48 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ControlMonthLedger } from './ControlMonthLedger'
+import { ControlMonthLedger, type EnrichedRow } from './ControlMonthLedger'
 import { CategorizationDrawer, type DirtySnapshot } from './CategorizationDrawer'
-import { type Row } from './ControlTable'
+import { AggregatesPanel, type ServerAggregates } from './AggregatesPanel'
+import { ReviewToggleBar } from './ReviewToggleBar'
 import { type Category } from './CategoryCombobox'
 import { type Project } from './ProjectCombobox'
 
 interface Props {
-  rows: Row[]
+  rows: EnrichedRow[]
   categories: Category[]
   initialProjects: Project[]
+  serverAggregates: ServerAggregates
+  countPorRevisar: number
+  initialModo: 'todas' | 'pendientes'
+  userId: string
+  mes: string
 }
 
-export function ControlMonthShell({ rows, categories, initialProjects }: Props) {
+export function ControlMonthShell({
+  rows,
+  categories,
+  initialProjects,
+  serverAggregates,
+  countPorRevisar,
+  initialModo,
+  userId,
+  mes,
+}: Props) {
   const router = useRouter()
-  const [selectedTx, setSelectedTx] = useState<Row | null>(null)
+  const [modo, setModo] = useState<'todas' | 'pendientes'>(initialModo)
+  const [selectedTx, setSelectedTx] = useState<EnrichedRow | null>(null)
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set())
   const [pendingDirtySnapshot, setPendingDirtySnapshot] = useState<DirtySnapshot | null>(null)
 
   useEffect(() => {
     setRemovedIds(new Set())
   }, [rows])
+
+  function handleModoChange(nuevoModo: 'todas' | 'pendientes') {
+    setModo(nuevoModo)
+    router.replace(`/control?mes=${mes}&ver=${nuevoModo}`, { scroll: false })
+  }
 
   const markRemoved = (id: string) => {
     setRemovedIds((prev) => new Set(prev).add(id))
@@ -35,14 +56,31 @@ export function ControlMonthShell({ rows, categories, initialProjects }: Props) 
     setSelectedTx(txn)
   }
 
+  const rowsVisibles =
+    modo === 'pendientes' ? rows.filter((r) => r.por_revisar) : rows
+
   return (
     <>
+      <AggregatesPanel
+        serverAggregates={serverAggregates}
+        userId={userId}
+        mes={mes}
+      />
+
+      <div style={{ borderTop: '1px solid var(--rule)', margin: '0 0 24px' }} />
+
+      <ReviewToggleBar
+        count={countPorRevisar}
+        modo={modo}
+        onChange={handleModoChange}
+      />
+
       <ControlMonthLedger
-        rows={rows}
-        categories={categories}
+        rows={rowsVisibles}
         onRowClick={setSelectedTx}
         removedIds={removedIds}
       />
+
       <CategorizationDrawer
         transaction={selectedTx}
         categories={categories}

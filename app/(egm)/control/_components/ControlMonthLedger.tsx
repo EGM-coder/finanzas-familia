@@ -1,23 +1,21 @@
 'use client'
 import { fmtAmount } from '../../_lib/formatters'
 import { type Row } from './ControlTable'
+import { ReviewBadge } from './ReviewBadge'
 
-interface Category {
-  id: string
-  name: string
-  color: string | null
-  parent_id: string | null
+export type EnrichedRow = Row & {
+  rootColor: string | null
+  por_revisar: boolean
 }
 
 interface Props {
-  rows: Row[]
-  categories: Category[]
-  onRowClick?: (row: Row) => void
+  rows: EnrichedRow[]
+  onRowClick?: (row: EnrichedRow) => void
   removedIds?: Set<string>
 }
 
-function groupByDay(rows: Row[]): Array<{ date: string; rows: Row[] }> {
-  const map = new Map<string, Row[]>()
+function groupByDay(rows: EnrichedRow[]): Array<{ date: string; rows: EnrichedRow[] }> {
+  const map = new Map<string, EnrichedRow[]>()
   for (const row of rows) {
     const existing = map.get(row.date) ?? []
     existing.push(row)
@@ -36,13 +34,13 @@ function fmtDayLabel(dateStr: string): string {
   return `${DAY_NAMES[d.getDay()]}, ${d.getDate()} de ${MONTH_NAMES[d.getMonth()]}`
 }
 
-export function ControlMonthLedger({ rows, categories, onRowClick, removedIds }: Props) {
+export function ControlMonthLedger({ rows, onRowClick, removedIds }: Props) {
   if (rows.length === 0) {
     return (
-      <div style={{ padding: '64px 0', textAlign: 'center' }}>
-        <div className="display-it" style={{ fontSize: 24 }}>Sin movimientos este mes.</div>
+      <div style={{ padding: '48px 0', textAlign: 'center' }}>
+        <div className="display-it" style={{ fontSize: 22 }}>Nada por aquí.</div>
         <div className="roman" style={{ fontSize: 13, marginTop: 8, color: 'var(--ink-3)' }}>
-          Los movimientos PSD2 aparecerán aquí en cuanto lleguen.
+          Sin movimientos que coincidan con este filtro.
         </div>
       </div>
     )
@@ -61,7 +59,6 @@ export function ControlMonthLedger({ rows, categories, onRowClick, removedIds }:
               <LedgerRow
                 key={row.id}
                 row={row}
-                categories={categories}
                 onClick={onRowClick && !removedIds?.has(row.id) ? () => onRowClick(row) : undefined}
                 isRemoving={removedIds?.has(row.id) ?? false}
               />
@@ -96,21 +93,12 @@ function DayGroupHeader({ label, total }: { label: string; total: number }) {
 }
 
 function LedgerRow({
-  row, categories, onClick, isRemoving,
+  row, onClick, isRemoving,
 }: {
-  row: Row
-  categories: Category[]
+  row: EnrichedRow
   onClick?: () => void
   isRemoving: boolean
 }) {
-  const cat = row.categories
-  let bulletColor: string | null = null
-  if (cat) {
-    bulletColor = cat.parent_id
-      ? (categories.find((c) => c.id === cat.parent_id)?.color ?? null)
-      : cat.color
-  }
-
   const label = row.counterparty
     ?? (row.description ? row.description.slice(0, 60) : '—')
 
@@ -136,7 +124,7 @@ function LedgerRow({
           height: 8,
           borderRadius: '50%',
           flexShrink: 0,
-          background: bulletColor ?? 'var(--rule)',
+          background: row.rootColor ?? 'var(--rule)',
         }}
       />
 
@@ -148,11 +136,13 @@ function LedgerRow({
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
-          color: cat ? 'var(--ink)' : 'var(--ink-3)',
+          color: row.categories ? 'var(--ink)' : 'var(--ink-3)',
         }}
       >
         {label}
       </span>
+
+      {row.por_revisar && <ReviewBadge />}
 
       <span
         className={`num ${row.amount > 0 ? 'pos' : 'neg'}`}
