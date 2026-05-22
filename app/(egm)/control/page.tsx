@@ -1,37 +1,54 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { ControlHeader } from './_components/ControlHeader'
-import { ControlToggle } from './_components/ControlToggle'
-import { ControlClientShell } from './_components/ControlClientShell'
-import { ControlPagination } from './_components/ControlPagination'
-import { ControlEmpty } from './_components/ControlEmpty'
-
-const PAGE_SIZE = 50
+import { MonthSwitcher } from './_components/MonthSwitcher'
+import { ControlMonthShell } from './_components/ControlMonthShell'
 
 interface Props {
-  searchParams: Promise<{ filter?: string; page?: string }>
+  searchParams: Promise<{ mes?: string }>
+}
+
+function currentMes(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function monthRange(mes: string): { start: string; end: string } {
+  const [year, month] = mes.split('-').map(Number)
+  const start = `${year}-${String(month).padStart(2, '0')}-01`
+  const nextYear = month === 12 ? year + 1 : year
+  const nextMonth = month === 12 ? 1 : month + 1
+  const end = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`
+  return { start, end }
 }
 
 export default async function ControlPage({ searchParams }: Props) {
   const params = await searchParams
-  const filter = (params.filter === 'todas' ? 'todas' : 'pendientes') as 'pendientes' | 'todas'
-  const page = Math.max(1, parseInt(params.page ?? '1', 10))
-  const offset = (page - 1) * PAGE_SIZE
+  const mes = params.mes ?? currentMes()
+
+  // Validate format YYYY-MM
+  if (!/^\d{4}-\d{2}$/.test(mes)) redirect(`/control?mes=${currentMes()}`)
+
+  const { start, end } = monthRange(mes)
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [totalRes, pendientesRes, categoriesRes, projectsRes] = await Promise.all([
+  const [txnsRes, categoriesRes, projectsRes] = await Promise.all([
     supabase
       .from('transactions')
-      .select('id', { count: 'exact', head: true })
-      .eq('source', 'psd2'),
-    supabase
-      .from('transactions')
-      .select('id', { count: 'exact', head: true })
+      .select(`
+        id, date, description, counterparty, raw_concept, amount, currency,
+        category_id, project_id, nature, titular, is_reimbursable,
+        accounts(institution, name),
+        categories(id, name, color, parent_id),
+        projects(id, name)
+      `)
       .eq('source', 'psd2')
-      .is('category_id', null),
+      .gte('date', start)
+      .lt('date', end)
+      .order('date', { ascending: false })
+      .order('id', { ascending: false }),
     supabase
       .from('categories')
       .select('id, name, parent_id, color, is_active')
@@ -45,44 +62,21 @@ export default async function ControlPage({ searchParams }: Props) {
       .order('name', { ascending: true }),
   ])
 
-  const total = totalRes.count ?? 0
-  const pendientes = pendientesRes.count ?? 0
+  if (txnsRes.error) throw new Error(txnsRes.error.message)
+
+  const rows = (txnsRes.data ?? []) as unknown as Parameters<typeof ControlMonthShell>[0]['rows']
   const categories = categoriesRes.data ?? []
   const initialProjects = projectsRes.data ?? []
 
-  let query = supabase
-    .from('transactions')
-    .select(`
-      id, date, description, counterparty, raw_concept, amount, currency, category_id, project_id, nature, titular, is_reimbursable,
-      accounts(institution, name),
-      categories(id, name, color, parent_id),
-      projects(id, name)
-    `, { count: 'exact' })
-    .eq('source', 'psd2')
-    .order('date', { ascending: false })
-    .order('id', { ascending: false })
-    .range(offset, offset + PAGE_SIZE - 1)
-
-  if (filter === 'pendientes') query = query.is('category_id', null)
-
-  const { data, count, error } = await query
-  if (error) throw new Error(error.message)
-
-  const totalForFilter = count ?? 0
-  const totalPages = Math.max(1, Math.ceil(totalForFilter / PAGE_SIZE))
-
   return (
-    <div className="max-w-6xl mx-auto px-8 py-12">
-      <ControlHeader />
-      <ControlToggle pendientes={pendientes} total={total} active={filter} />
-      {data && data.length > 0 ? (
-        <>
-          <ControlClientShell rows={data as unknown as Parameters<typeof ControlClientShell>[0]['rows']} categories={categories} initialProjects={initialProjects} />
-          <ControlPagination page={page} totalPages={totalPages} total={totalForFilter} filter={filter} />
-        </>
-      ) : (
-        <ControlEmpty filter={filter} />
-      )}
+    <div className="max-w-3xl mx-auto px-8 py-12">
+      <div className="label" style={{ marginBottom: 8, color: 'var(--ink-3)' }}>Control</div>
+      <MonthSwitcher mes={mes} />
+      <ControlMonthShell
+        rows={rows}
+        categories={categories}
+        initialProjects={initialProjects}
+      />
     </div>
   )
 }
