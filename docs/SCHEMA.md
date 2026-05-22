@@ -681,6 +681,21 @@ Usado por el Planner ZBB para ingreso esperado en scope personal. Scope comparti
 
 ---
 
+### `public.v_fixed_expenses_observed` *(mig 34)*
+
+Vista-espejo de gastos fijos observados. Agrega transacciones con `nature='fijo_recurrente'` (decisión humana ya tomada) por `counterparty + year + month + visibility`. Solo agrega; no infiere periodicidad ni detecta suscripciones.
+
+```
+counterparty, year, month, visibility,
+total_spent, txn_count, avg_amount, first_seen, last_seen
+```
+
+`total_spent` y `avg_amount` = valores positivos (`ABS`). `security_invoker = true` — hereda RLS de `transactions` vía `can_see_account` (mig 32). Ana no ve fijos de cuentas `privada_eric`. Sin GRANT especial: `authenticated` hereda de `transactions`.
+
+**Uso:** panel Finanzas · bloque "Gastos fijos observados" — referencia de lectura. **Nunca auto-rellena los gastos fijos declarados (localStorage).**
+
+---
+
 ### `public.weekly_closures` *(mig 30)*
 
 Cierre semanal persistido. UNIQUE(week_start, scope). Escrita por `CloseSplashWeekly` vía UPSERT ON CONFLICT.
