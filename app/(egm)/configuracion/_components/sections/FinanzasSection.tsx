@@ -29,11 +29,23 @@ interface GastoFijo {
   frequency: 'monthly' | 'annual'
 }
 
+interface FixedObservedRow {
+  counterparty: string | null
+  total_spent: number
+  txn_count: number
+  avg_amount: number
+  first_seen: string
+  last_seen: string
+}
+
 interface Props {
   medianIncome: number | null
   monthsWithData: number
   incomes: Income[]
   userId: string
+  fixedObserved: FixedObservedRow[]
+  supermerSpent: number | null
+  referenceMonth: { year: number; month: number }
 }
 
 // ── Constants ────────────────────────────────────────────────
@@ -67,7 +79,7 @@ type FormState = ReturnType<typeof emptyForm>
 
 // ── Main section ─────────────────────────────────────────────
 
-export function FinanzasSection({ medianIncome, monthsWithData, incomes, userId }: Props) {
+export function FinanzasSection({ medianIncome, monthsWithData, incomes, userId, fixedObserved, supermerSpent, referenceMonth }: Props) {
   // Ingreso esperado personal
   const [incomeExpected, setIncomeExpected] = useState<string>('')
   // Ingreso conjunto esperado
@@ -571,11 +583,80 @@ export function FinanzasSection({ medianIncome, monthsWithData, incomes, userId 
           </form>
         )}
       </div>
+
+      {/* ── Gastos fijos observados (espejo) ──────────────── */}
+      <div style={{ marginTop: 32 }}>
+        <div className="label" style={{ color: 'var(--ink-2)', marginBottom: 4 }}>
+          Gastos fijos observados
+        </div>
+        <EditorialBlock style={{ marginBottom: 12 }}>
+          <p>
+            Lo que ya marcaste como gasto fijo en {MONTH_NAMES[referenceMonth.month - 1]} {referenceMonth.year}.
+            Solo agrega; no detecta ni infiere nada.
+          </p>
+        </EditorialBlock>
+
+        {fixedObserved.length === 0 ? (
+          <p className="roman" style={{ fontSize: 13, color: 'var(--ink-4)', padding: '12px 0' }}>
+            Sin transacciones marcadas como fijo recurrente este mes.
+          </p>
+        ) : (
+          <>
+            {fixedObserved.map((row, i) => (
+              <div
+                key={i}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--rule)' }}
+              >
+                <div>
+                  <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+                    {row.counterparty ?? '—'}
+                  </span>
+                  <span className="roman" style={{ fontSize: 12, marginLeft: 8, color: 'var(--ink-4)' }}>
+                    {row.txn_count} mov.
+                  </span>
+                </div>
+                <span className="num" style={{ fontSize: 13 }}>
+                  {fmtAmount(Number(row.total_spent))}
+                </span>
+              </div>
+            ))}
+            <div
+              style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: '1px solid var(--ink)', marginTop: 2 }}
+            >
+              <span className="label" style={{ fontSize: 10 }}>Total observado</span>
+              <span className="num" style={{ fontSize: 13 }}>
+                {fmtAmount(fixedObserved.reduce((s, r) => s + Number(r.total_spent), 0))}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Supermercado observado ─────────────────────────── */}
+      <div style={{ marginTop: 32 }}>
+        <div className="label" style={{ color: 'var(--ink-2)', marginBottom: 4 }}>
+          Supermercado
+        </div>
+        <EditorialBlock style={{ marginBottom: 12 }}>
+          <p>
+            Total categorizado en Supermercado en {MONTH_NAMES[referenceMonth.month - 1]} {referenceMonth.year}.
+          </p>
+        </EditorialBlock>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', borderBottom: '1px solid var(--rule)' }}>
+          <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>Gasto mensual</span>
+          <span className="num" style={{ fontSize: 18 }}>
+            {supermerSpent != null ? fmtAmount(supermerSpent) : '——'}
+          </span>
+        </div>
+      </div>
     </div>
   )
 }
 
 // ── Helpers ──────────────────────────────────────────────────
+
+const MONTH_NAMES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
 function FieldGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (

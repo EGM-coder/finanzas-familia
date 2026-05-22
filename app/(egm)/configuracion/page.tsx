@@ -35,7 +35,11 @@ export default async function ConfiguracionPage({ searchParams }: Props) {
   }
 
   if (section === 'finanzas') {
-    const [medianRes, incomesRes] = await Promise.all([
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = now.getMonth() + 1
+
+    const [medianRes, incomesRes, supermerCatRes, fixedObsRes] = await Promise.all([
       supabase
         .from('v_median_income_3m')
         .select('median_monthly_income, months_with_data')
@@ -46,7 +50,35 @@ export default async function ConfiguracionPage({ searchParams }: Props) {
         .select('id, date, type, gross_amount, irpf_withheld, ss_withheld, net_amount, employer, concept')
         .order('date', { ascending: false })
         .limit(100),
+      supabase
+        .from('categories')
+        .select('id')
+        .eq('name', 'Supermercado')
+        .eq('is_default', true)
+        .single(),
+      supabase
+        .from('v_fixed_expenses_observed')
+        .select('counterparty, total_spent, txn_count, avg_amount, first_seen, last_seen')
+        .eq('year', year)
+        .eq('month', month)
+        .order('total_spent', { ascending: false })
+        .limit(50),
     ])
+
+    // Sum supermercado across all visibility buckets (RLS ensures only visible rows)
+    let supermerSpent: number | null = null
+    if (supermerCatRes.data?.id) {
+      const { data: supermerRows } = await supabase
+        .from('v_spent_by_category_month')
+        .select('spent')
+        .eq('year', year)
+        .eq('month', month)
+        .eq('category_id', supermerCatRes.data.id)
+
+      if (supermerRows && supermerRows.length > 0) {
+        supermerSpent = supermerRows.reduce((sum, r) => sum + Number(r.spent), 0)
+      }
+    }
 
     return (
       <FinanzasSection
@@ -54,6 +86,9 @@ export default async function ConfiguracionPage({ searchParams }: Props) {
         monthsWithData={medianRes.data?.months_with_data ?? 0}
         incomes={incomesRes.data ?? []}
         userId={user.id}
+        fixedObserved={fixedObsRes.data ?? []}
+        supermerSpent={supermerSpent}
+        referenceMonth={{ year, month }}
       />
     )
   }
