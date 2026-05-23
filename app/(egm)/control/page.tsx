@@ -4,6 +4,7 @@ import { MonthSwitcher } from './_components/MonthSwitcher'
 import { ControlMonthShell } from './_components/ControlMonthShell'
 import { type EnrichedRow } from './_components/ControlMonthLedger'
 import { type ServerAggregates } from './_components/AggregatesPanel'
+import { computeConsumo } from '../_lib/computeConsumo'
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ function computeControlData(
   fixedData: { total_spent: number }[],
   medianData: { median_monthly_income: number; months_with_data: number } | null,
   incomesData: { net_amount: number }[],
+  maristasProjectId: string | null,
 ): { enrichedRows: EnrichedRow[]; countPorRevisar: number; serverAggregates: ServerAggregates } {
   // Enrich rows with rootColor + por_revisar flag
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,11 +62,8 @@ function computeControlData(
 
   const countPorRevisar = enrichedRows.filter((r) => r.por_revisar).length
 
-  // gastoMes: magnitud de salidas (amount < 0)
-  const gastoMes = enrichedRows.reduce(
-    (sum, r) => (r.amount < 0 ? sum + Math.abs(r.amount) : sum),
-    0,
-  )
+  // gastoMes: consumo = outflows excl. transferencia, inversion y capex Maristas
+  const gastoMes = computeConsumo(enrichedRows, maristasProjectId)
 
   // porNaturaleza: magnitud de gastos por nature (amount < 0 only)
   const natMap = new Map<string | null, number>()
@@ -185,6 +184,7 @@ export default async function ControlPage({ searchParams }: Props) {
   const initialProjects = projectsRes.data ?? []
   const superCatId = superCatRes.data?.id ?? null
   const catMap = new Map(categories.map((c) => [c.id, c]))
+  const maristasProjectId = initialProjects.find((p) => /maristas/i.test(p.name))?.id ?? null
 
   // ── Round 2: vistas dependientes de superCatId ───────────────
   const [supermerRes, fixedObsRes, medianIncRes, incomesRes] = await Promise.all([
@@ -221,6 +221,7 @@ export default async function ControlPage({ searchParams }: Props) {
     fixedObsRes.data ?? [],
     medianIncRes.data ?? null,
     incomesRes.data ?? [],
+    maristasProjectId,
   )
 
   return (
