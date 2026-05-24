@@ -92,12 +92,14 @@ export function PlannerShell({ data, userId, mes, maristasProjectId }: Props) {
         }
       `}</style>
 
-      {/* ── Sección 1: Resumen operativo (3 tarjetas) ── */}
-      <PlannerGrid>
+      {/* ── Sección 1: Resumen operativo ── */}
+      {/* Consumo + Ingresos: insumos en 2 columnas */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 1, background: 'var(--rule)' }}>
         <PlannerCard
           label="Consumo"
           value={data.consumo}
           tone="negative"
+          sublabel={data.fijosObservados > 0 ? `Fijos observados: ${fmtAmount(data.fijosObservados)}` : undefined}
         />
         <PlannerCard
           label="Ingresos totales"
@@ -105,13 +107,15 @@ export function PlannerShell({ data, userId, mes, maristasProjectId }: Props) {
           tone="positive"
           sublabel={ingresoSublabel}
         />
-        <PlannerCard
-          label="Remanente"
-          value={data.remanente}
-          tone={data.remanente >= 0 ? 'positive' : 'negative'}
-          sublabel={data.fijosObservados > 0 ? `Fijos observados: ${fmtAmount(data.fijosObservados)}` : undefined}
-        />
-      </PlannerGrid>
+        {/* Remanente: conclusión del bloque, banda full-width */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <PlannerCard
+            label="Remanente"
+            value={data.remanente}
+            tone={data.remanente >= 0 ? 'positive' : 'negative'}
+          />
+        </div>
+      </div>
 
       <Hairline />
 
