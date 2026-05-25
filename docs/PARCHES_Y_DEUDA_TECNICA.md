@@ -193,4 +193,4 @@ Para estados deshabilitados en navegación interna con `<Link>`, conmutar el ele
 | D-002 | Migraciones 10, 11, 13 no están commiteadas en el repo (solo en Supabase) | Media |
 | D-003 | `app/api/callback/route.ts` y `app/api/bank/` usan schema de bank_connections de Copilot — adaptar a mig 22 | Alta |
 | D-004 | `supabase/seed/` no existe en repo — crear seed_accounts.sql y seed_holdings.sql para recovery futura | Alta |
-| D-006 | `v_spent_by_category_month` no excluye gastos de `nature='inversion'`: la serie de Supermercado en Tendencia podría incluir inversiones categorizadas bajo Supermercado (caso teórico improbable en la práctica). Aceptado sin DDL; solución futura: añadir filtro `AND nature != 'inversion'` a la vista. | Baja |
+| T-019 | `v_spent_by_category_month` no excluye gastos de `nature='inversion'`: la serie de Supermercado en Tendencia podría incluir inversiones categorizadas bajo Supermercado (caso teórico improbable en la práctica). Aceptado sin DDL; solución futura: añadir filtro `AND nature != 'inversion'` a la vista. | Baja |

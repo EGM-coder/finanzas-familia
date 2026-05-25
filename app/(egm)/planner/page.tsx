@@ -113,7 +113,7 @@ function computeTendencia(
     const remanenteVal = incomesVal === undefined ? null : incomesVal - (consumoVal ?? 0)
     remanenteSeries.push({ mes, value: remanenteVal })
 
-    // D-006: v_spent_by_category_month no excluye nature='inversion' (ver PARCHES D-006)
+    // T-019: v_spent_by_category_month no excluye nature='inversion' (ver PARCHES T-019)
     const superRow = superAll?.find(r => r.year === year && r.month === month)
     superSeries.push({ mes, value: superRow !== undefined ? Number(superRow.spent) : null })
 
