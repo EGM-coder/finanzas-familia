@@ -6,6 +6,8 @@ import { computeConsumo } from '../_lib/computeConsumo'
 
 // ── Types ────────────────────────────────────────────────────
 
+export type TendenciaPoint = { mes: string; value: number | null }
+
 export interface PlannerData {
   // Sección 1 — operativo
   consumo: number          // outflows excl. transferencia, inversion, Maristas
@@ -25,6 +27,13 @@ export interface PlannerData {
     fijosObservados: number | null
     inversiones: number | null
     maristas: number | null
+  }
+  // Sección 6 — tendencia (serie observada, 6 meses anteriores, orden cronológico)
+  tendencia: {
+    consumo:         TendenciaPoint[]
+    remanente:       TendenciaPoint[]
+    superObservado:  TendenciaPoint[]
+    fijosObservados: TendenciaPoint[]
   }
 }
 
@@ -55,8 +64,65 @@ function priorMonthsList(mes: string, count: number): { year: number; month: num
 }
 
 type TxnRow = { amount: number; nature: string | null; project_id: string | null }
+type TxnRowWithDate = TxnRow & { date: string }
+type IncomeRowDate = { net_amount: number; date: string }
 type FixedRow = { total_spent: number; year: number; month: number }
 type SpentRow = { spent: number; year: number; month: number }
+
+// Tendencia: serie observada mes a mes para la ventana de 6 meses previos.
+// null = sin transacciones ese mes (hueco honesto); 0 = mes con txns pero consumo cero.
+// Remanente es null si no hay registros de ingresos ese mes.
+function computeTendencia(
+  window6: { year: number; month: number }[],  // [mes-1, ..., mes-6] de priorMonthsList
+  prior6Txns: TxnRowWithDate[],
+  prior6Incomes: IncomeRowDate[],
+  fixedAll: FixedRow[],
+  superAll: SpentRow[] | null,
+  maristasProjectId: string | null,
+): PlannerData['tendencia'] {
+  // Orden cronológico (más antiguo primero) para mostrar izquierda→derecha
+  const chrono = [...window6].reverse()
+
+  const txnsByMonth = new Map<string, TxnRowWithDate[]>()
+  for (const t of prior6Txns) {
+    const key = t.date.slice(0, 7)
+    if (!txnsByMonth.has(key)) txnsByMonth.set(key, [])
+    txnsByMonth.get(key)!.push(t)
+  }
+
+  const incomesByMonth = new Map<string, number>()
+  for (const i of prior6Incomes) {
+    const key = i.date.slice(0, 7)
+    incomesByMonth.set(key, (incomesByMonth.get(key) ?? 0) + Number(i.net_amount))
+  }
+
+  const consumoSeries:  TendenciaPoint[] = []
+  const remanenteSeries: TendenciaPoint[] = []
+  const superSeries:    TendenciaPoint[] = []
+  const fijosSeries:    TendenciaPoint[] = []
+
+  for (const { year, month } of chrono) {
+    const mes = `${year}-${String(month).padStart(2, '0')}`
+    const monthTxns = txnsByMonth.get(mes)
+    // null si no hay transacciones ese mes (hueco honesto, no cero)
+    const consumoVal = monthTxns === undefined ? null : computeConsumo(monthTxns, maristasProjectId)
+    consumoSeries.push({ mes, value: consumoVal })
+
+    // remanente null si sin registros de ingresos ese mes
+    const incomesVal = incomesByMonth.get(mes)
+    const remanenteVal = incomesVal === undefined ? null : incomesVal - (consumoVal ?? 0)
+    remanenteSeries.push({ mes, value: remanenteVal })
+
+    // D-006: v_spent_by_category_month no excluye nature='inversion' (ver PARCHES D-006)
+    const superRow = superAll?.find(r => r.year === year && r.month === month)
+    superSeries.push({ mes, value: superRow !== undefined ? Number(superRow.spent) : null })
+
+    const fixedRow = fixedAll.find(r => r.year === year && r.month === month)
+    fijosSeries.push({ mes, value: fixedRow !== undefined ? Number(fixedRow.total_spent) : null })
+  }
+
+  return { consumo: consumoSeries, remanente: remanenteSeries, superObservado: superSeries, fijosObservados: fijosSeries }
+}
 
 function computePlannerData(
   txns: TxnRow[],
@@ -67,7 +133,9 @@ function computePlannerData(
   year: number,
   month: number,
   prior3: { year: number; month: number }[],
-  prior3Txns: TxnRow[],
+  prior6: { year: number; month: number }[],
+  prior6Txns: TxnRowWithDate[],
+  prior6Incomes: IncomeRowDate[],
 ): PlannerData {
   // consumo = outflows excl. transferencia, inversion y capex Maristas
   const consumo = computeConsumo(txns, maristasProjectId)
@@ -102,18 +170,21 @@ function computePlannerData(
     .map(([nature, total]) => ({ nature, total }))
     .sort((a, b) => b.total - a.total)
 
-  // ── Baseline (media 3m) ──────────────────────────────────────
+  // ── Baseline (media 3m) — usando los 3 meses más recientes del bloque prior6 ──
+  const prior3Earliest = prior3[prior3.length - 1]
+  const prior3DateStart = `${prior3Earliest.year}-${String(prior3Earliest.month).padStart(2, '0')}-01`
+  const prior3TxnsFiltered = prior6Txns.filter(t => t.date >= prior3DateStart)
   const n = prior3.length || 1
 
-  const baseConsumo = computeConsumo(prior3Txns, maristasProjectId) / n
+  const baseConsumo = computeConsumo(prior3TxnsFiltered, maristasProjectId) / n
 
   const baseInversiones =
-    prior3Txns
+    prior3TxnsFiltered
       .filter((r) => r.nature === 'inversion' && r.amount < 0)
       .reduce((s, r) => s + Math.abs(r.amount), 0) / n
 
   const baseMaristas =
-    prior3Txns
+    prior3TxnsFiltered
       .filter((r) => r.amount < 0 && maristasProjectId !== null && r.project_id === maristasProjectId)
       .reduce((s, r) => s + Math.abs(r.amount), 0) / n
 
@@ -131,6 +202,9 @@ function computePlannerData(
   const baseSuper =
     prior3SuperVals.length > 0 ? prior3SuperVals.reduce((s, v) => s + v, 0) / prior3SuperVals.length : null
 
+  // ── Tendencia (serie observada 6m) ──────────────────────────
+  const tendencia = computeTendencia(prior6, prior6Txns, prior6Incomes, fixedAll, superAll, maristasProjectId)
+
   return {
     consumo, ingresosMes, fijosObservados, remanente,
     inversiones, maristas,
@@ -142,6 +216,7 @@ function computePlannerData(
       inversiones: baseInversiones,
       maristas: baseMaristas,
     },
+    tendencia,
   }
 }
 
@@ -163,9 +238,11 @@ export default async function PlannerPage({ searchParams }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const prior3 = priorMonthsList(mes, 3)
-  const earliest = prior3[prior3.length - 1]
-  const prior3Start = `${earliest.year}-${String(earliest.month).padStart(2, '0')}-01`
+  // prior6: ventana de tendencia (6m); prior3: ventana de baseline (3m más recientes del prior6)
+  const prior6 = priorMonthsList(mes, 6)
+  const prior3 = prior6.slice(0, 3)
+  const prior6Earliest = prior6[prior6.length - 1]
+  const prior6Start = `${prior6Earliest.year}-${String(prior6Earliest.month).padStart(2, '0')}-01`
 
   // ── Round 1 ──────────────────────────────────────────────────
   const [txnsRes, categoriesRes, fixedAllRes, incomesRes, maristasProjectRes] = await Promise.all([
@@ -200,12 +277,18 @@ export default async function PlannerPage({ searchParams }: Props) {
   const maristasProjectId = maristasProjectRes.data?.id ?? null
 
   // ── Round 2 ──────────────────────────────────────────────────
-  const [prior3TxnsRes, superAllRes] = await Promise.all([
+  // Una query por rango; agrupación por mes en memoria (sin DDL adicional)
+  const [prior6TxnsRes, prior6IncomesRes, superAllRes] = await Promise.all([
     supabase
       .from('transactions')
-      .select('amount, nature, project_id')
+      .select('amount, nature, project_id, date')
       .eq('source', 'psd2')
-      .gte('date', prior3Start)
+      .gte('date', prior6Start)
+      .lt('date', start),
+    supabase
+      .from('incomes')
+      .select('net_amount, date')
+      .gte('date', prior6Start)
       .lt('date', start),
     superCatId
       ? supabase
@@ -224,7 +307,9 @@ export default async function PlannerPage({ searchParams }: Props) {
     year,
     month,
     prior3,
-    prior3TxnsRes.data ?? [],
+    prior6,
+    prior6TxnsRes.data ?? [],
+    prior6IncomesRes.data ?? [],
   )
 
   return (
