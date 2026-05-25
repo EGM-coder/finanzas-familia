@@ -85,6 +85,7 @@ Si hay 0 ✗ y 0 DUDA, el arquitecto valida directamente. Si hay alguno, el arqu
 - **PRO-4 · Commits limpios:** uno por feature; no mezclar el trabajo del paso con residuos de limpieza ni con artefactos de verificación.
 - **PRO-5 · Artefactos derivados fuera del repo:** dumps de schema, listados regenerables, carpetas de verificación → `.gitignore`, no a git.
 - **PRO-6 · Working tree consciente:** reportar qué queda sin commitear/trackear y por qué.
+- **PRO-7 · Identificadores en la serie correcta:** D-xxx = doctrina, T-xxx = deuda técnica, P-xxx = parches. No mezclar series ni reutilizar un id ya asignado. Antes de fijar uno nuevo, verificar el mayor en uso de esa serie.
 
 ## 7 · Específico del paso
 

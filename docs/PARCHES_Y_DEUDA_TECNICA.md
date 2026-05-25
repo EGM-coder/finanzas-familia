@@ -5,6 +5,19 @@ Formato: `P-NNN · (fecha) · estado · descripción`
 
 ---
 
+## Convención de identificadores
+
+| Serie | Uso |
+|-------|-----|
+| **D-xxx** | Decisiones doctrinales |
+| **T-xxx** | Deuda técnica (este archivo) |
+| **P-xxx** | Parches / lecciones aprendidas |
+
+No mezclar series. Al asignar un identificador nuevo, verificar el mayor en uso
+**de esa serie** antes de fijarlo.
+
+---
+
 ## P-001 · 27-abr-2026 · **RESUELTO** (mig 20)
 **Roboadvisor MyInvestor sin cotización pública en `holdings`**
 
