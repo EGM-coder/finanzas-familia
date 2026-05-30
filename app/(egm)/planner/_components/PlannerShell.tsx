@@ -7,6 +7,8 @@ import { PlannerGrid } from './PlannerGrid'
 import { PlannerBarCompare } from './PlannerBarCompare'
 import { PlannerDonut } from './PlannerDonut'
 import { PlannerNarrative } from './PlannerNarrative'
+import { PlannerTrend } from './PlannerTrend'
+import { AdvisorSlot } from './AdvisorSlot'
 import { type PlannerData } from '../page'
 
 interface Props {
@@ -244,6 +246,48 @@ export function PlannerShell({ data, userId, mes, maristasProjectId }: Props) {
         fijosDeclarados={fijosDeclarados}
         mounted={mounted}
       />
+
+      <Hairline />
+
+      {/* ── Sección 6: Tendencia (serie observada, 6 meses anteriores) ── */}
+      {/* DIN-1: orden de tarjetas fijo por diseño, no por score de relevancia */}
+      <SectionLabel>Tendencia 6 meses</SectionLabel>
+      <PlannerGrid>
+        <div className="card" style={{ padding: '20px 24px' }}>
+          <PlannerTrend
+            series={data.tendencia.consumo}
+            label="Consumo"
+            color="var(--signal-neg)"
+          />
+        </div>
+        <div className="card" style={{ padding: '20px 24px' }}>
+          {/* signed=true: barras positivas (verde) y negativas (rojo) para remanente */}
+          <PlannerTrend
+            series={data.tendencia.remanente}
+            label="Remanente"
+            signed
+          />
+        </div>
+        <div className="card" style={{ padding: '20px 24px' }}>
+          <PlannerTrend
+            series={data.tendencia.superObservado}
+            label="Supermercado"
+            color="var(--signal-neg)"
+          />
+        </div>
+        <div className="card" style={{ padding: '20px 24px' }}>
+          <PlannerTrend
+            series={data.tendencia.fijosObservados}
+            label="Gastos fijos observados"
+            color="var(--ink-3)"
+          />
+        </div>
+      </PlannerGrid>
+
+      <Hairline />
+
+      {/* ── Sección 7: Asesor IA (contenedor reservado, vacío) ── */}
+      <AdvisorSlot />
     </div>
   )
 }
