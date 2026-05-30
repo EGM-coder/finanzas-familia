@@ -630,7 +630,7 @@ Gasto real por `(year, month, category_id, visibility)`. Contrato de lectura pri
 
 **Splits-first:** si la txn tiene splits → agrega por `transaction_splits.(category_id, amount)`; si no → por `transactions.(category_id, amount)`. Implementado con `UNION ALL + NOT EXISTS`.
 
-**Filtro:** `amount < 0` (gastos únicamente) · `nature IS DISTINCT FROM 'transferencia'` (excluye transferencias internas; permite `nature IS NULL`).
+**Filtro:** `amount < 0` (gastos únicamente) · `(nature IS NULL OR nature NOT IN ('transferencia', 'inversion'))` — excluye transferencias internas e inversiones; preserva `nature IS NULL` (txns pendientes de categorizar). *(T-019 · mig 30)*
 
 ```
 year, month, category_id, visibility, spent, txn_count
