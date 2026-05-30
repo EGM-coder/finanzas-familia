@@ -16,6 +16,10 @@ P-013 fix (13-may-2026):
 - Batch SELECT previo por external_id para clasificar INSERT / UPDATE / sin cambios
 - Logging: "X insertadas, Y actualizadas, Z sin cambios" por banco y en total
 
+T-011 fix (30-may-2026):
+- raw_concept ahora almacena el remittance_information legible (' | '-joined), no el JSON crudo.
+  Si remittance vacío → None. Backfill de txns existentes: backfill_raw_concept_t011.py.
+
 Fase 1 v10 (14-may-2026): classification_rules en INSERT
 - Carga reglas activas (is_active=true) una vez al inicio del run, ordered by priority asc
 - Aplica la primera regla que matchea a cada txn nueva (rama to_insert)
@@ -193,7 +197,7 @@ def map_txn(txn: dict, account_id: str, bank_connection_id: str,
         'amount': amount,
         'currency': amt_obj.get('currency', 'EUR'),
         'description': description[:500] if description else None,
-        'raw_concept': json.dumps(txn)[:2000],
+        'raw_concept': (' | '.join(remittance))[:2000] if remittance else None,
         'titular': 'eric',
         'source': 'psd2',
         'source_id': ext_id,

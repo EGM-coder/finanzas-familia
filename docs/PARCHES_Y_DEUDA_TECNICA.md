@@ -198,6 +198,21 @@ Para estados deshabilitados en navegación interna con `<Link>`, conmutar el ele
 
 ---
 
+## T-011 · 30-may-2026 · **RESUELTO**
+**`raw_concept` almacenaba el payload JSON crudo de Enable Banking**
+
+`sync_psd2.py` → `map_txn()` poblaba `raw_concept` con `json.dumps(txn)[:2000]` — el dict completo de Enable Banking serializado. La intención de la columna es almacenar el concepto bancario legible (remittance_information), no el JSON de transporte.
+
+**Impacto:** DAT-1 garantizaba que `raw_concept` nunca era visible en UI, pero las reglas de clasificación (match_field='raw_concept') matcheaban contra JSON, no contra texto. El campo era inutilizable para reglas futuras del tipo "concepto contiene X".
+
+**Solución:**
+- `sync_psd2.py` · `map_txn()`: `raw_concept = ' | '.join(remittance_information)` si no vacío, `None` si vacío. Sin fallback a reference_number (description mantiene el suyo).
+- `backfill_raw_concept_t011.py`: script standalone idempotente con dry-run/apply. Parsea el JSON de las txns existentes y reconstruye el valor limpio con el mismo criterio.
+
+**Verificación:** backfill --apply 30-may-2026 = 170 éxitos, 0 fallos. SELECT post-apply: 0 filas con `raw_concept LIKE '{%'`.
+
+---
+
 ## Deuda técnica pendiente
 
 | ID | Descripción | Prioridad |
