@@ -22,6 +22,11 @@ export type BudgetRowData = {
   amount_planned: number  // numeric de Postgres → number; 0 = rastro histórico
 }
 
+export type SpentRowData = {
+  category_id: string
+  spent: number
+}
+
 // ── Helpers ──────────────────────────────────────────────────
 
 function currentMes(): string {
@@ -47,7 +52,7 @@ export default async function BudgetPage({ searchParams }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [catsRes, budgetsRes, medianRes] = await Promise.all([
+  const [catsRes, budgetsRes, spentRes, medianRes] = await Promise.all([
     supabase
       .from('categories')
       .select('id, name, parent_id, color')
@@ -60,6 +65,11 @@ export default async function BudgetPage({ searchParams }: Props) {
       .eq('year', year)
       .eq('month', month)
       .eq('visibility', 'compartida'),
+    supabase
+      .from('v_spent_by_category_month')
+      .select('category_id, spent')
+      .eq('year', year)
+      .eq('month', month),
     supabase
       .from('v_median_income_3m')
       .select('median_monthly_income, months_with_data')
@@ -77,6 +87,7 @@ export default async function BudgetPage({ searchParams }: Props) {
     .filter(g => g.leaves.length > 0)
 
   const budgets = (budgetsRes.data ?? []) as BudgetRowData[]
+  const spent   = (spentRes.data   ?? []) as SpentRowData[]
   const medianIncome = medianRes.data?.median_monthly_income
     ? Number(medianRes.data.median_monthly_income)
     : null
@@ -88,6 +99,7 @@ export default async function BudgetPage({ searchParams }: Props) {
       <BudgetShell
         grouped={grouped}
         budgets={budgets}
+        spent={spent}
         medianIncome={medianIncome}
         year={year}
         month={month}

@@ -2,13 +2,14 @@
 import { useRef, useState } from 'react'
 import { fmtAmount } from '../../_lib/formatters'
 import { saveBudgetEntry } from '../actions'
-import { type BudgetGroup, type BudgetRowData } from '../page'
+import { type BudgetGroup, type BudgetRowData, type SpentRowData } from '../page'
 
 // ── Types ────────────────────────────────────────────────────
 
 interface Props {
   grouped:      BudgetGroup[]
   budgets:      BudgetRowData[]
+  spent:        SpentRowData[]
   medianIncome: number | null
   year:         number
   month:        number
@@ -18,7 +19,8 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
 // ── Component ─────────────────────────────────────────────────
 
-export function BudgetShell({ grouped, budgets, medianIncome, year, month }: Props) {
+export function BudgetShell({ grouped, budgets, spent, medianIncome, year, month }: Props) {
+  const spentMap = new Map<string, number>(spent.map(s => [s.category_id, Number(s.spent)]))
   // budgetMap: category_id → amount_planned en DB
   //   !has(id)       → sin fila (no asignado, ZBB base-cero)
   //   get(id) === 0  → fila con 0 (rastro histórico, tratar igual que sin fila)
@@ -86,11 +88,10 @@ export function BudgetShell({ grouped, budgets, medianIncome, year, month }: Pro
     if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
   }
 
-  // ── Footer: solo amount > 0 cuenta como asignado ──────────
-  const asignado = Array.from(budgetMap.values())
-    .filter(v => v > 0)
-    .reduce((s, v) => s + v, 0)
-  const sinAsignar = medianIncome !== null ? medianIncome - asignado : null
+  // ── Footer totales ─────────────────────────────────────────
+  const asignado     = Array.from(budgetMap.values()).filter(v => v > 0).reduce((s, v) => s + v, 0)
+  const gastadoTotal = Array.from(spentMap.values()).reduce((s, v) => s + v, 0)
+  const sinAsignar   = medianIncome !== null ? medianIncome - asignado : null
 
   return (
     <div>
@@ -111,9 +112,12 @@ export function BudgetShell({ grouped, budgets, medianIncome, year, month }: Pro
           </div>
 
           {leaves.map(leaf => {
-            const status   = statuses.get(leaf.id) ?? 'idle'
-            const inputVal = inputValues.get(leaf.id) ?? ''
-            const isSaving = status === 'saving'
+            const status     = statuses.get(leaf.id) ?? 'idle'
+            const inputVal   = inputValues.get(leaf.id) ?? ''
+            const isSaving   = status === 'saving'
+            const gastado    = spentMap.get(leaf.id) ?? 0
+            const planificado = budgetMap.get(leaf.id) ?? 0
+            const diferencia  = planificado - gastado  // positivo = sobra, negativo = sobregasto
 
             return (
               <div
@@ -130,56 +134,89 @@ export function BudgetShell({ grouped, budgets, medianIncome, year, month }: Pro
                   {leaf.name}
                 </span>
 
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  {/* Indicador de estado — solo texto, sin emojis */}
-                  <span
-                    className="label"
-                    style={{
-                      fontSize: 8,
-                      minWidth: 28,
-                      textAlign: 'right',
-                      color: status === 'error' ? 'var(--signal-neg)'
-                           : status === 'saved'  ? 'var(--signal-pos)'
-                           : 'transparent',
-                    }}
-                  >
-                    {status === 'error' ? 'error' : status === 'saved' ? 'ok' : '.'}
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 20 }}>
+                  {/* Gastado real (solo lectura) */}
+                  {gastado > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                      <span className="label" style={{ fontSize: 8, color: 'var(--ink-4)' }}>Gastado</span>
+                      <span className="num" style={{ fontSize: 13, color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>
+                        {fmtAmount(gastado)}
+                      </span>
+                    </div>
+                  )}
 
-                  <span className="roman" style={{ fontSize: 11, color: 'var(--ink-4)' }}>€</span>
+                  {/* Diferencia planificado − gastado (solo si ambos tienen valor) */}
+                  {(planificado > 0 || gastado > 0) && gastado > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                      <span className="label" style={{ fontSize: 8, color: 'var(--ink-4)' }}>Dif.</span>
+                      <span
+                        className="num"
+                        style={{
+                          fontSize: 13,
+                          fontVariantNumeric: 'tabular-nums',
+                          color: diferencia < 0 ? 'var(--signal-neg)' : 'var(--ink-3)',
+                        }}
+                      >
+                        {diferencia >= 0 ? '+' : ''}{fmtAmount(diferencia)}
+                      </span>
+                    </div>
+                  )}
 
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={inputVal}
-                    placeholder="0"
-                    disabled={isSaving}
-                    onChange={e =>
-                      setInputValues(prev => new Map(prev).set(leaf.id, e.target.value))
-                    }
-                    onBlur={() => handleSave(leaf.id)}
-                    onKeyDown={handleKeyDown}
-                    style={{
-                      width: 88,
-                      textAlign: 'right',
-                      fontFamily: 'var(--mono)',
-                      fontSize: 14,
-                      fontVariantNumeric: 'tabular-nums',
-                      background: 'transparent',
-                      border: 'none',
-                      borderBottom: `1px solid ${
-                        status === 'error'  ? 'var(--signal-neg)'
-                        : isSaving         ? 'var(--ink-4)'
-                        : status === 'saved' ? 'var(--signal-pos)'
-                        : 'var(--rule)'
-                      }`,
-                      outline: 'none',
-                      padding: '2px 0',
-                      color: 'var(--ink)',
-                      opacity: isSaving ? 0.45 : 1,
-                      transition: 'border-color 200ms, opacity 150ms',
-                    }}
-                  />
+                  {/* Input planificado */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                    <span className="label" style={{ fontSize: 8, color: 'var(--ink-4)' }}>Planificado</span>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                      {/* Indicador de estado — solo texto, sin emojis */}
+                      <span
+                        className="label"
+                        style={{
+                          fontSize: 8,
+                          minWidth: 28,
+                          textAlign: 'right',
+                          color: status === 'error' ? 'var(--signal-neg)'
+                               : status === 'saved'  ? 'var(--signal-pos)'
+                               : 'transparent',
+                        }}
+                      >
+                        {status === 'error' ? 'error' : status === 'saved' ? 'ok' : '.'}
+                      </span>
+
+                      <span className="roman" style={{ fontSize: 11, color: 'var(--ink-4)' }}>€</span>
+
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={inputVal}
+                        placeholder="0"
+                        disabled={isSaving}
+                        onChange={e =>
+                          setInputValues(prev => new Map(prev).set(leaf.id, e.target.value))
+                        }
+                        onBlur={() => handleSave(leaf.id)}
+                        onKeyDown={handleKeyDown}
+                        style={{
+                          width: 88,
+                          textAlign: 'right',
+                          fontFamily: 'var(--mono)',
+                          fontSize: 14,
+                          fontVariantNumeric: 'tabular-nums',
+                          background: 'transparent',
+                          border: 'none',
+                          borderBottom: `1px solid ${
+                            status === 'error'   ? 'var(--signal-neg)'
+                            : isSaving          ? 'var(--ink-4)'
+                            : status === 'saved' ? 'var(--signal-pos)'
+                            : 'var(--rule)'
+                          }`,
+                          outline: 'none',
+                          padding: '2px 0',
+                          color: 'var(--ink)',
+                          opacity: isSaving ? 0.45 : 1,
+                          transition: 'border-color 200ms, opacity 150ms',
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             )
@@ -208,6 +245,15 @@ export function BudgetShell({ grouped, budgets, medianIncome, year, month }: Pro
               {fmtAmount(asignado)}
             </span>
           </div>
+
+          {gastadoTotal > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <span className="label" style={{ fontSize: 9, color: 'var(--ink-4)' }}>Gastado</span>
+              <span className="num" style={{ fontSize: 22, color: 'var(--ink-2)' }}>
+                {fmtAmount(gastadoTotal)}
+              </span>
+            </div>
+          )}
 
           {sinAsignar !== null && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
