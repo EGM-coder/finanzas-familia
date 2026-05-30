@@ -228,6 +228,8 @@ Presupuesto mensual por categoría y visibilidad. UNIQUE `(year, month, category
 
 **Índices:** `(year, month)`, `(category_id)`.
 
+**GRANTs (mig 30):** `authenticated` tiene `SELECT, INSERT, UPDATE`. Sin DELETE — historial presupuestario intacto (decisión cerrada, mig 03).
+
 ---
 
 ### 2.8 · `public.savings_goals` *(mig 03)*
@@ -787,6 +789,8 @@ El repo tiene dos grupos de migraciones con número corto 22–25 (PSD2 de abril
 | 20260517000023 | `grants_classification_rules_authenticated.sql` | mig 23 (Fase 3) — INSERT/UPDATE/DELETE en classification_rules |
 | 20260518000024 | `t013_transferencias_internas.sql` | mig 24 (Fase 3) — nature 'transferencia' + categoría |
 | 20260518000025 | `t014_categoria_ingresos.sql` | mig 25 (Fase 3) — categoría Ingresos |
+| 20260530000029 | `t019_v_spent_exclude_inversion.sql` | T-019 — excluye nature='inversion' de v_spent_by_category_month |
+| 20260530000030 | `grants_budgets_authenticated.sql` | INSERT/UPDATE en budgets para authenticated (ZBB Bloque 5) |
 
 ---
 

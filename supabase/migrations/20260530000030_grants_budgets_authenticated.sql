@@ -1,0 +1,22 @@
+-- ============================================================
+-- Migración 30 (30-may-2026): GRANTs faltantes a authenticated sobre budgets
+-- ============================================================
+-- Diagnóstico (30-may-2026, Bloque 5 Paso 1 ZBB):
+--   information_schema.role_table_grants muestra que `authenticated`
+--   solo tenía SELECT sobre public.budgets. Las políticas RLS
+--   existían correctas pero a nivel SQL faltaban los GRANTs.
+--   saveBudgetEntry (server action) fallaba con 42501 'permission denied'.
+--
+-- Mismo patrón que migración 23 (classification_rules grants).
+--
+-- Se otorgan INSERT, UPDATE:
+--   - INSERT: saveBudgetEntry — UPSERT de nueva asignación (amount > 0).
+--   - UPDATE: saveBudgetEntry — UPDATE a 0 de asignación existente.
+--
+-- NO se otorga DELETE: budgets es sin-DELETE por diseño (historial
+-- presupuestario intacto). Decisión cerrada en migración 3.
+--
+-- Idempotente: GRANT es no-op si ya existe.
+-- ============================================================
+
+grant insert, update on table public.budgets to authenticated;
