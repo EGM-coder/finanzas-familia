@@ -15,7 +15,7 @@ export async function saveBudgetEntry(
   month: number,
   categoryId: string,
   amount: number,
-): Promise<{ error?: string }> {
+): Promise<{ ok?: true; error?: string }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autenticado' }
@@ -41,5 +41,5 @@ export async function saveBudgetEntry(
   }
 
   revalidatePath('/budget')
-  return {}
+  return { ok: true }
 }

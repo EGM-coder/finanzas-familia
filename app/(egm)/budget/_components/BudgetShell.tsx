@@ -61,7 +61,7 @@ export function BudgetShell({ grouped, budgets, medianIncome, year, month }: Pro
 
     const result = await saveBudgetEntry(year, month, catId, amount)
 
-    if (result.error) {
+    if (!result?.ok) {
       setStatus(catId, 'error')
       return
     }
