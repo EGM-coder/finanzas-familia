@@ -143,3 +143,11 @@ Commits relevantes de la sesión (cronológico):
 ---
 
 **Fin del estado. ZBB v1 operativo. Próxima sesión arranca eligiendo frente entre las opciones del §5.**
+
+---
+
+## Apéndice 31-may · housekeeping
+
+- D-002/003/004 verificadas y cerradas como obsoletas (estado del repo ya las superaba).
+- Residuos limpiados (commit 5ca680f).
+- Hallazgo: colisiones de número lógico en migraciones → P-015. No se renumera (Supabase rastrea por nombre completo; renombrar rompe historial).

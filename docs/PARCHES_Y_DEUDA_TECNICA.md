@@ -213,12 +213,25 @@ Para estados deshabilitados en navegación interna con `<Link>`, conmutar el ele
 
 ---
 
+## P-015 · 31-may-2026 · **ACTIVO** (regla permanente)
+**Colisiones de número lógico en migraciones**
+
+Los sufijos numéricos cortos (22, 23, 24, 25, 29, 30…) aparecen en más de una tanda de fechas distintas. Ejemplo: `20260506000023` (psd2_grants) y `20260517000023` (grants_classification_rules) comparten sufijo 23 pero son archivos distintos.
+
+**Por qué no es un bug:** Supabase ordena y rastrea migraciones por el **nombre completo del archivo** (`schema_migrations` almacena el nombre entero). El timestamp del prefijo garantiza el orden de aplicación correcto.
+
+**Por qué no se renumera:** `supabase db push` identifica migraciones ya aplicadas por nombre. Renombrar un archivo ya aplicado lo haría aparecer como migración nueva y se aplicaría dos veces, corrompiendo el historial.
+
+**Regla:** al crear una migración, verificar que el **prefijo timestamp completo** `YYYYMMDDNNNNNN` sea único en `supabase/migrations/`. El sufijo numérico corto puede colisionar entre fechas; no es identificador único.
+
+---
+
 ## Deuda técnica pendiente
 
 | ID | Descripción | Prioridad |
 |----|-------------|-----------|
 | D-001 | CHECK constraint en `holding_prices`: exigir ticker OR isin NOT NULL (ver P-008) | Baja |
-| D-002 | Migraciones 10, 11, 13 no están commiteadas en el repo (solo en Supabase) | Media |
-| D-003 | `app/api/callback/route.ts` y `app/api/bank/` usan schema de bank_connections de Copilot — adaptar a mig 22 | Alta |
-| D-004 | `supabase/seed/` no existe en repo — crear seed_accounts.sql y seed_holdings.sql para recovery futura | Alta |
-| T-019 | `v_spent_by_category_month` no excluye gastos de `nature='inversion'`: la serie de Supermercado en Tendencia podría incluir inversiones categorizadas bajo Supermercado (caso teórico improbable en la práctica). Aceptado sin DDL; solución futura: añadir filtro `AND nature != 'inversion'` a la vista. | Baja |
+| D-002 | ~~Migraciones 10, 11, 13 no están commiteadas~~ — **OBSOLETA** (31-may-2026): archivos `...010_holdings`, `...011_account_balances_full`, `...013_currency_rates` presentes en `supabase/migrations/`. Estado ya superado. | — |
+| D-003 | ~~`app/api/callback/route.ts` y `app/api/bank/` usan schema Copilot~~ — **OBSOLETA** (31-may-2026): `app/api/` no existe en el repo. Nada que limpiar. | — |
+| D-004 | ~~`supabase/seed/` no existe~~ — **OBSOLETA** (31-may-2026): `supabase/seed/` existe y contiene `seed_accounts.sql` y `seed_holdings.sql`. | — |
+| T-019 | **RESUELTA** (mig 29, 30-may-2026). Ver entrada T-019 arriba. | — |

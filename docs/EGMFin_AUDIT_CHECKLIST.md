@@ -87,6 +87,7 @@ Si hay 0 ✗ y 0 DUDA, el arquitecto valida directamente. Si hay alguno, el arqu
 - **PRO-5 · Artefactos derivados fuera del repo:** dumps de schema, listados regenerables, carpetas de verificación → `.gitignore`, no a git.
 - **PRO-6 · Working tree consciente:** reportar qué queda sin commitear/trackear y por qué.
 - **PRO-7 · Identificadores en la serie correcta:** D-xxx = doctrina, T-xxx = deuda técnica, P-xxx = parches. No mezclar series ni reutilizar un id ya asignado. Antes de fijar uno nuevo, verificar el mayor en uso de esa serie.
+- **PRO-8 · Prefijo timestamp de migración único:** el sufijo numérico corto (22, 23…) puede colisionar entre tandas de fechas distintas. Verificar que el prefijo completo `YYYYMMDDNNNNNN` sea único en `supabase/migrations/` antes de crear una migración. No renombrar migraciones ya aplicadas (P-015).
 
 ## 7 · Específico del paso
 
