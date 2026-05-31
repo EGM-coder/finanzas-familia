@@ -39,6 +39,7 @@ Modo DRY_RUN: exporta DRY_RUN=1 para ver qué insertaría/actualizaría sin escr
 
 import os
 import re
+import sys
 import json
 import hashlib
 import logging
@@ -312,6 +313,7 @@ def sync_psd2():
     total_txns = 0
     total_inserted = 0
     total_updated = 0
+    accounts_with_4xx = 0
     total_unchanged = 0
     total_rules_applied = 0
 
@@ -330,8 +332,14 @@ def sync_psd2():
 
         try:
             txns = fetch_account_transactions(uid, days_back=DAYS_BACK)
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else 0
+            logger.error(f'  ❌ HTTP {status} de {aspsp}: {e}')
+            if 400 <= status < 500:
+                accounts_with_4xx += 1  # P-016: 4xx marca el job rojo al final
+            continue
         except Exception as e:
-            logger.error(f'  ❌ Error fetching: {e}')
+            logger.error(f'  ❌ Error fetching {aspsp}: {e}')
             continue
 
         logger.info(f'  📋 {len(txns)} txns descargadas en {DAYS_BACK} días')
@@ -445,6 +453,13 @@ def sync_psd2():
         f'{total_inserted} insertadas ({total_rules_applied} con regla) · '
         f'{total_updated} actualizadas · {total_unchanged} sin cambios'
     )
+
+    if accounts_with_4xx:
+        logger.error(
+            f'⚠️  Sync terminó con errores 4xx en {accounts_with_4xx} cuenta(s) '
+            f'— revisar consentimiento/ventana'
+        )
+        sys.exit(1)
 
 
 if __name__ == '__main__':

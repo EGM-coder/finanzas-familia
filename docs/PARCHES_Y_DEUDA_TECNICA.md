@@ -226,6 +226,20 @@ Los sufijos numéricos cortos (22, 23, 24, 25, 29, 30…) aparecen en más de un
 
 ---
 
+## P-016 · 01-jun-2026 · **RESUELTO**
+**Sync PSD2 fallaba en silencio: job verde con 0 inserciones, 2 semanas de datos congelados**
+
+El job de sync (`sync_psd2.py`) terminaba con exit 0 (verde en GitHub Actions) aunque ninguna transacción se insertara. Causa: `fetch_account_transactions` pedía `date_from = now − 90 días`; el límite regulatorio PSD2 sin SCA es estrictamente < 90 días. Kutxabank y Santander devolvían 422 Client Error, el `except Exception` lo logueaba como `❌ Error fetching` y continuaba. El job sumaba 0 transacciones pero terminaba verde. Dos semanas de datos congelados sin ninguna alerta.
+
+**Fix doble (commits 94173e4 + este):**
+
+1. **Ventana 90 → 89 días** (`DAYS_BACK` y default de `fetch_account_transactions`): margen seguro bajo el tope PSD2. Sigue configurable vía env var `DAYS_BACK`.
+2. **4xx ahora marca exit ≠ 0:** se distingue `requests.exceptions.HTTPError` del resto de excepciones. Si el código HTTP es 4xx, el job acumula el contador `accounts_with_4xx` y termina con `sys.exit(1)` tras procesar todas las cuentas (no aborta a mitad — las cuentas siguientes se procesan igualmente). GitHub Actions marca el run rojo y llega notificación. Los 5xx y otras excepciones transitorias siguen con `continue` sin romper el job.
+
+**Lección:** un sync que falla en verde es peor que uno que se cae con estruendo. Las alertas silenciosas no son alertas.
+
+---
+
 ## Deuda técnica pendiente
 
 | ID | Descripción | Prioridad |
