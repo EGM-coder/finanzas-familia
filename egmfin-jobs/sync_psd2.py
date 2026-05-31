@@ -62,7 +62,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 DRY_RUN = os.getenv('DRY_RUN', '0') == '1'
 
 EB_BASE_URL = 'https://api.enablebanking.com'
-DAYS_BACK = int(os.getenv('DAYS_BACK', '90'))
+DAYS_BACK = int(os.getenv('DAYS_BACK', '89'))  # 89 = margen seguro bajo tope PSD2 de 89 días sin SCA
 
 # Campos del banco que el sync puede actualizar.
 # NUNCA se tocan: titular, account_id, nature, category_id, project_id,
@@ -110,7 +110,7 @@ def eb_get(path: str, params: Optional[dict] = None) -> dict:
     return resp.json()
 
 
-def fetch_account_transactions(account_uid: str, days_back: int = 90) -> list:
+def fetch_account_transactions(account_uid: str, days_back: int = 89) -> list:
     date_from = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime('%Y-%m-%d')
     params = {'date_from': date_from}
     all_txns = []
