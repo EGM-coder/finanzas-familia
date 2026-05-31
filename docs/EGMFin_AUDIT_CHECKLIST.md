@@ -77,6 +77,7 @@ Si hay 0 ✗ y 0 DUDA, el arquitecto valida directamente. Si hay alguno, el arqu
 - **DAT-2 · Reutilización:** vistas/componentes existentes se reutilizan, no se recrean (súper, fijos-espejo, drawer, `MonthSwitcher`…).
 - **VIS-1 · Identidad editorial:** tokens del sistema (hairlines, serif Newsreader, Geist Mono). Sin sombras, radius, gradientes, chips de fondo, emojis ni iconos chart-up. Sin librerías de charting (SVG propio).
 - **VIS-2 · Sin barras de progreso presupuestario / semáforo** (eso es ZBB, fase posterior).
+- **DES-1 · Auditoría de sistema de diseño:** todo componente o pantalla nueva se audita contra `docs/EGMFin_DESIGN_SYSTEM.md` antes de cerrar el paso. Verificar: tokens usados (sin hex hardcoded), clase tipográfica correcta, motion dentro del catálogo, copy canónico o al menos coherente con la voz, ninguna prohibición de §5 violada.
 
 ## 6 · Higiene de proceso
 
