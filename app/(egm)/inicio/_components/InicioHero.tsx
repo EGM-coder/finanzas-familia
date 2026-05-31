@@ -38,18 +38,16 @@ function useCountUp(target: number, durationSec: number): number {
 interface Props {
   liquidos: number
   patrimonioNeto: number
-  patrimonioSiFirmara: number
   deltaNeto: number | null
 }
 
-export function InicioHero({ liquidos, patrimonioNeto, patrimonioSiFirmara, deltaNeto }: Props) {
+export function InicioHero({ liquidos, patrimonioNeto, deltaNeto }: Props) {
   const shouldReduce = useReducedMotion() ?? false
   const duration = shouldReduce ? 0.15 : 0.6
   const display = useCountUp(liquidos, duration)
 
   const hasDelta = deltaNeto != null && Math.abs(deltaNeto) > 0.5
   const deltaPos = (deltaNeto ?? 0) >= 0
-  const siFirmaraIsNeg = patrimonioSiFirmara < 0
 
   return (
     <div>
@@ -68,27 +66,12 @@ export function InicioHero({ liquidos, patrimonioNeto, patrimonioSiFirmara, delt
         Disponible hoy · inmueble y opciones Nordex aparte
       </div>
 
-      {/* ── Neto actual + Si firmara hoy ── */}
-      <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: '4px 20px' }}>
+      {/* ── Neto actual ── */}
+      <div style={{ marginTop: 10 }}>
         <span className="roman" style={{ fontSize: 12 }}>
           Neto actual ·{' '}
           <span className="num" style={{ fontSize: 12 }}>
             {fmt(patrimonioNeto)} €
-          </span>
-        </span>
-        <span
-          className="roman"
-          style={{ fontSize: 12, color: siFirmaraIsNeg ? 'var(--signal-neg)' : undefined }}
-        >
-          Si firmara hoy ·{' '}
-          <span
-            className="num"
-            style={{
-              fontSize: 12,
-              color: siFirmaraIsNeg ? 'var(--signal-neg)' : undefined,
-            }}
-          >
-            {siFirmaraIsNeg ? '\u2212' : ''}{fmt(patrimonioSiFirmara)} €
           </span>
         </span>
       </div>

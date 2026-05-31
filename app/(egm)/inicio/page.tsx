@@ -23,7 +23,7 @@ function fmt(n: number): string {
 type SovRow = {
   vested: boolean
   exercisable_now: boolean
-  vesting_date: string | null
+  exercise_window_start: string | null
   num_options: number
 }
 
@@ -37,14 +37,19 @@ function buildVestingNote(sov: SovRow[]): string {
 
   if (sov.some((r) => r.vested)) return 'vested · fuera de ventana de ejercicio'
 
+  // Ningún paquete vested aún → año en que abre la ventana de ejercicio más próxima
   const earliest = [...sov]
-    .filter((r) => r.vesting_date)
-    .sort((a, b) => new Date(a.vesting_date!).getTime() - new Date(b.vesting_date!).getTime())[0]
+    .filter((r) => r.exercise_window_start)
+    .sort(
+      (a, b) =>
+        new Date(a.exercise_window_start!).getTime() -
+        new Date(b.exercise_window_start!).getTime(),
+    )[0]
 
-  const year = earliest ? new Date(earliest.vesting_date!).getFullYear() : null
+  const year = earliest ? new Date(earliest.exercise_window_start!).getFullYear() : null
   return year
     ? `informativo · no ejercitable hasta ${year}`
-    : 'informativo · vesting pendiente'
+    : 'informativo · ventana de ejercicio pendiente'
 }
 
 // ── Page ─────────────────────────────────────────────────────────
@@ -70,7 +75,7 @@ export default async function InicioPage() {
     supabase
       .from('patrimonio_neto')
       .select(
-        'liquidos_y_holdings, inmuebles, activos_total, deudas_activas, patrimonio_neto_actual, patrimonio_neto_si_firmara_hoy, stock_options_intrinsic',
+        'liquidos_y_holdings, inmuebles, activos_total, deudas_activas, patrimonio_neto_actual, stock_options_intrinsic',
       )
       .maybeSingle(),
     supabase
@@ -79,7 +84,7 @@ export default async function InicioPage() {
       .maybeSingle(),
     supabase
       .from('stock_options_valued')
-      .select('package_name, num_options, intrinsic_total, vested, exercisable_now, vesting_date'),
+      .select('package_name, num_options, intrinsic_total, vested, exercisable_now, exercise_window_start'),
     supabase.from('projects').select('id, name').eq('status', 'active'),
     supabase
       .from('v_median_income_3m')
@@ -114,7 +119,6 @@ export default async function InicioPage() {
   const activosTotal = Number(pn?.activos_total ?? 0)
   const deudasActivas = Number(pn?.deudas_activas ?? 0)
   const patrimonioNeto = Number(pn?.patrimonio_neto_actual ?? 0)
-  const patrimonioSiFirmara = Number(pn?.patrimonio_neto_si_firmara_hoy ?? 0)
   const stockIntrinsic = Number(pn?.stock_options_intrinsic ?? 0)
   const pctLiquidos = activosTotal > 0 ? Math.round((liquidos / activosTotal) * 100) : null
   const deltaNeto = snapRes.data?.delta_neto_actual != null
@@ -159,7 +163,6 @@ export default async function InicioPage() {
         <InicioHero
           liquidos={liquidos}
           patrimonioNeto={patrimonioNeto}
-          patrimonioSiFirmara={patrimonioSiFirmara}
           deltaNeto={deltaNeto}
         />
       </div>
