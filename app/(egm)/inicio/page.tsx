@@ -71,8 +71,8 @@ export default async function InicioPage() {
   const nm = month === 12 ? 1 : month + 1
   const end = `${ny}-${String(nm).padStart(2, '0')}-01`
 
-  // ── Round 1 · vistas patrimonio + proyectos + mediana ────────
-  const [pnRes, snapRes, sovRes, projRes, medianRes] = await Promise.all([
+  // ── Round 1 · vistas patrimonio + proyectos + mediana + cats ─
+  const [pnRes, snapRes, sovRes, projRes, medianRes, incomeCatsRes] = await Promise.all([
     supabase
       .from('patrimonio_neto')
       .select(
@@ -92,17 +92,36 @@ export default async function InicioPage() {
       .select('median_monthly_income')
       .eq('user_id', user.id)
       .maybeSingle(),
+    // Hojas de ingreso recurrente: Nómina y Dividendos, hijas de "Ingresos"
+    supabase
+      .from('categories')
+      .select('id, name, parent_id')
+      .in('name', ['Ingresos', 'Nómina', 'Dividendos'])
+      .eq('is_active', true),
   ])
 
   const maristasProjectId =
     (projRes.data ?? []).find((p) => /maristas/i.test(p.name))?.id ?? null
 
+  // Resolver IDs de hojas de ingreso recurrente por nombre + parentesco
+  const cats = incomeCatsRes.data ?? []
+  const ingresosParentId = cats.find((c) => c.name === 'Ingresos')?.id ?? null
+  const nominaId = cats.find(
+    (c) => c.name === 'Nómina' && c.parent_id === ingresosParentId,
+  )?.id ?? null
+  const dividendosId = cats.find(
+    (c) => c.name === 'Dividendos' && c.parent_id === ingresosParentId,
+  )?.id ?? null
+  const incomeCatIds = [nominaId, dividendosId].filter((id): id is string => id != null)
+
   // ── Round 2 · flujo del mes ──────────────────────────────────
-  const [incomesRes, txnsRes, fixedRes] = await Promise.all([
-    supabase.from('incomes').select('net_amount').gte('date', start).lt('date', end),
+  // ingresos leídos desde transactions (misma fuente que patrimonio_neto),
+  // filtrados por hojas Nómina + Dividendos, excluyendo transferencias.
+  // incomes no se toca — reservada para módulo fiscal futuro.
+  const [txnsRes, fixedRes] = await Promise.all([
     supabase
       .from('transactions')
-      .select('amount, nature, project_id')
+      .select('amount, nature, project_id, category_id')
       .eq('source', 'psd2')
       .gte('date', start)
       .lt('date', end),
@@ -132,8 +151,20 @@ export default async function InicioPage() {
   const vestingNote = buildVestingNote(sov)
 
   // ── Flujo del mes ────────────────────────────────────────────
-  const ingresosMes = (incomesRes.data ?? []).reduce((s, r) => s + Number(r.net_amount), 0)
-  const consumoMes  = computeConsumo(txnsRes.data ?? [], maristasProjectId)
+  const txns = txnsRes.data ?? []
+  const ingresosMes = incomeCatIds.length > 0
+    ? txns
+        .filter(
+          (r) =>
+            r.amount > 0 &&
+            r.nature !== 'transferencia' &&
+            r.category_id != null &&
+            incomeCatIds.includes(r.category_id),
+        )
+        .reduce((s, r) => s + Number(r.amount), 0)
+    : 0
+  const ingresosPendiente = ingresosMes === 0
+  const consumoMes  = computeConsumo(txns, maristasProjectId)
   const fijosMes    = (fixedRes.data ?? []).reduce((s, r) => s + Number(r.total_spent), 0)
   const margenMes   = ingresosMes - consumoMes
   const medianIncome = medianRes.data?.median_monthly_income
@@ -258,9 +289,15 @@ export default async function InicioPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
               <div>
                 <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Ingresos</div>
-                <div className="num pos" style={{ fontSize: 22 }}>
-                  +{fmt(ingresosMes)}
-                </div>
+                {ingresosPendiente ? (
+                  <div className="roman" style={{ fontSize: 13 }}>
+                    Ingresos del mes · pendiente
+                  </div>
+                ) : (
+                  <div className="num pos" style={{ fontSize: 22 }}>
+                    +{fmt(ingresosMes)}
+                  </div>
+                )}
                 {medianIncome != null && (
                   <div className="roman" style={{ fontSize: 10.5, marginTop: 3 }}>
                     mediana 3m · {fmt(medianIncome)} €
