@@ -203,9 +203,15 @@ Lista unificada desde todas las fuentes disponibles. Sin duplicados. Cada ítem 
 | Glow ni brillo en modo oscuro | briefing §7.4 |
 | Color como única señal (siempre + texto o forma) | briefing §7.5 |
 | Librerías externas de charting (Recharts, Chart.js, etc.) | briefing §1 — SVG propio + Visx permitidos |
-| Fuentes fuera del sistema | egm.css — solo `--serif`, `--sans`, `--mono` |
+| Fuentes fuera del sistema (Inter, Roboto, system-ui para titulares) | egm.css — solo `--serif`, `--sans`, `--mono` |
 | Valores hex hardcoded (usar variables CSS) | principio general del sistema |
 | Chips de fondo de colores en categorías (fondo lleno) | auditoría AUDIT_CHECKLIST VIS-1 |
+| Glassmorphism (blur de fondo + transparencia decorativa) | EGMFin_Documentacion_Completa |
+| Neumorphism (sombras extruidas, relieve 3D soft) | EGMFin_Documentacion_Completa |
+| Bounce / spring animations (solo ease-in-out del catálogo del sistema) | EGMFin_Documentacion_Completa |
+| Colores brillantes / neón (saturación fuera de la paleta de tokens) | EGMFin_Documentacion_Completa |
+| Iconos genéricos de finanzas (money bag, chart-up, moneda, etc.) | EGMFin_Documentacion_Completa, README §9 |
+| Modernizar el tono editorial (mantener registro ensayo-banca-privada) | README §9 |
 
 ### 5.2 · Comportamiento y datos
 
