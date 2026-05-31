@@ -17,7 +17,9 @@ function editorialMonth(d: Date): string {
 }
 
 function fmt(n: number): string {
-  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(Math.abs(Math.round(n)))
+  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(
+    Math.abs(Math.round(n)),
+  )
 }
 
 type SovRow = {
@@ -37,7 +39,6 @@ function buildVestingNote(sov: SovRow[]): string {
 
   if (sov.some((r) => r.vested)) return 'vested · fuera de ventana de ejercicio'
 
-  // Ningún paquete vested aún → año en que abre la ventana de ejercicio más próxima
   const earliest = [...sov]
     .filter((r) => r.exercise_window_start)
     .sort(
@@ -70,7 +71,7 @@ export default async function InicioPage() {
   const nm = month === 12 ? 1 : month + 1
   const end = `${ny}-${String(nm).padStart(2, '0')}-01`
 
-  // ── Round 1 · vistas de patrimonio + proyectos + mediana ─────
+  // ── Round 1 · vistas patrimonio + proyectos + mediana ────────
   const [pnRes, snapRes, sovRes, projRes, medianRes] = await Promise.all([
     supabase
       .from('patrimonio_neto')
@@ -112,197 +113,206 @@ export default async function InicioPage() {
       .eq('month', month),
   ])
 
-  // ── Valores de patrimonio ────────────────────────────────────
+  // ── Patrimonio ───────────────────────────────────────────────
   const pn = pnRes.data
-  const liquidos = Number(pn?.liquidos_y_holdings ?? 0)
-  const inmuebles = Number(pn?.inmuebles ?? 0)
-  const activosTotal = Number(pn?.activos_total ?? 0)
-  const deudasActivas = Number(pn?.deudas_activas ?? 0)
+  const liquidos    = Number(pn?.liquidos_y_holdings  ?? 0)
+  const inmuebles   = Number(pn?.inmuebles            ?? 0)
+  const activosTotal = Number(pn?.activos_total       ?? 0)
+  const deudasActivas = Number(pn?.deudas_activas     ?? 0)
   const patrimonioNeto = Number(pn?.patrimonio_neto_actual ?? 0)
   const stockIntrinsic = Number(pn?.stock_options_intrinsic ?? 0)
   const pctLiquidos = activosTotal > 0 ? Math.round((liquidos / activosTotal) * 100) : null
   const deltaNeto = snapRes.data?.delta_neto_actual != null
-    ? Number(snapRes.data.delta_neto_actual)
-    : null
+    ? Number(snapRes.data.delta_neto_actual) : null
+  const hasDelta = deltaNeto != null && Math.abs(deltaNeto) > 0.5
+  const deltaPos = (deltaNeto ?? 0) >= 0
 
   // ── Stock options ────────────────────────────────────────────
   const sov = (sovRes.data ?? []) as SovRow[]
   const vestingNote = buildVestingNote(sov)
 
   // ── Flujo del mes ────────────────────────────────────────────
-  const ingresosMes = (incomesRes.data ?? []).reduce(
-    (s, r) => s + Number(r.net_amount),
-    0,
-  )
-  const consumoMes = computeConsumo(txnsRes.data ?? [], maristasProjectId)
-  const fijosMes = (fixedRes.data ?? []).reduce(
-    (s, r) => s + Number(r.total_spent),
-    0,
-  )
-  const margenMes = ingresosMes - consumoMes
+  const ingresosMes = (incomesRes.data ?? []).reduce((s, r) => s + Number(r.net_amount), 0)
+  const consumoMes  = computeConsumo(txnsRes.data ?? [], maristasProjectId)
+  const fijosMes    = (fixedRes.data ?? []).reduce((s, r) => s + Number(r.total_spent), 0)
+  const margenMes   = ingresosMes - consumoMes
   const medianIncome = medianRes.data?.median_monthly_income
-    ? Number(medianRes.data.median_monthly_income)
-    : null
+    ? Number(medianRes.data.median_monthly_income) : null
+
+  // ── Composición rows ─────────────────────────────────────────
+  type Row = { roman: string; name: string; note?: string; amount: number; pct: number | null; neg?: boolean }
+  const composicion: Row[] = [
+    { roman: 'I',   name: 'Líquido y fondos', amount: liquidos,     pct: pctLiquidos },
+    { roman: 'II',  name: 'Inmueble',          note: 'en construcción · valor comprometido', amount: inmuebles, pct: null },
+    { roman: 'III', name: 'Deudas activas',    amount: deudasActivas, pct: null, neg: true },
+  ]
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', padding: '20px 22px 80px' }}>
+    // maxWidth with percentage padding preserves layout on narrower viewports;
+    // inner grid collapses to single column with a future media query on .inicio-grid
+    <div style={{ maxWidth: 960, margin: '0 auto', padding: '34px 50px 50px' }}>
 
       {/* ── Cabecera ─────────────────────────────────────────── */}
-      <div className="fade" style={{ marginBottom: 24 }}>
-        <div className="label" style={{ marginBottom: 4 }}>I · Inicio</div>
-        <div className="display" style={{ fontSize: 22 }}>
-          Hoy, {editorialDate(now)}
-        </div>
-        <div className="roman" style={{ fontSize: 12, marginTop: 3 }}>
-          Estado situacional · familia
-        </div>
-      </div>
-
-      {/* ── Bloque 1 · NÚCLEO ────────────────────────────────── */}
-      <div className="fade fade-1">
-        <InicioHero
-          liquidos={liquidos}
-          patrimonioNeto={patrimonioNeto}
-          deltaNeto={deltaNeto}
-        />
-      </div>
-
-      <div className="rule" style={{ margin: '24px 0' }} />
-
-      {/* ── Bloque 2 · ASIGNACIÓN POR CLASE ─────────────────── */}
-      <div className="label fade fade-2" style={{ marginBottom: 10 }}>
-        Composición
-      </div>
-
-      {/* Fila I · Líquido y fondos */}
       <div
-        className="fade fade-2"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '20px 1fr auto',
-          alignItems: 'baseline',
-          padding: '10px 0',
-          borderBottom: '1px solid var(--rule-2)',
-          gap: 12,
-        }}
+        className="fade"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}
       >
-        <span className="roman" style={{ fontSize: 11 }}>I</span>
-        <span style={{ fontSize: 14, fontWeight: 500 }}>Líquido y fondos</span>
-        <div style={{ textAlign: 'right' }}>
-          <div className="num" style={{ fontSize: 15 }}>{fmt(liquidos)} €</div>
-          {pctLiquidos != null && (
-            <div className="label" style={{ fontSize: 9 }}>{pctLiquidos}%</div>
-          )}
-        </div>
-      </div>
-
-      {/* Fila II · Inmueble (Maristas) */}
-      <div
-        className="fade fade-3"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '20px 1fr auto',
-          alignItems: 'start',
-          padding: '10px 0',
-          borderBottom: '1px solid var(--rule-2)',
-          gap: 12,
-        }}
-      >
-        <span className="roman" style={{ fontSize: 11, paddingTop: 3 }}>II</span>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 500 }}>Inmueble</div>
-          <div className="roman" style={{ fontSize: 11, marginTop: 2 }}>
-            en construcción · valor comprometido
+          <div className="label">I · Inicio</div>
+          <div className="display" style={{ fontSize: 38, marginTop: 4 }}>
+            Hoy, {editorialDate(now)}
           </div>
         </div>
-        <div className="num" style={{ fontSize: 15, paddingTop: 3 }}>{fmt(inmuebles)} €</div>
+        <div className="roman" style={{ fontSize: 14 }}>Estado situacional · familia</div>
       </div>
 
-      {/* Fila III · Deudas activas */}
-      <div
-        className="fade fade-4"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '20px 1fr auto',
-          alignItems: 'baseline',
-          padding: '10px 0',
-          gap: 12,
-        }}
-      >
-        <span className="roman" style={{ fontSize: 11 }}>III</span>
-        <span style={{ fontSize: 14, fontWeight: 500 }}>Deudas activas</span>
-        <span className="num" style={{ fontSize: 15, color: 'var(--signal-neg)' }}>
-          {'\u2212'}{fmt(deudasActivas)} €
-        </span>
-      </div>
+      <div className="rule-strong" style={{ margin: '20px 0 32px' }} />
 
-      <div className="rule" style={{ margin: '20px 0' }} />
+      {/* ── Grid principal 1.4fr · 1fr ───────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 40 }}>
 
-      {/* ── Bloque 3 · CONTINGENTE ───────────────────────────── */}
-      <div className="label fade fade-4" style={{ marginBottom: 8 }}>
-        Contingente · fuera del neto
-      </div>
-      <div
-        className="card-soft fade fade-4"
-        style={{ padding: '12px 14px' }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={{ fontSize: 14, fontWeight: 500 }}>Opciones Nordex</span>
-          <span className="num" style={{ fontSize: 15 }}>
-            {fmt(stockIntrinsic)} €
-          </span>
-        </div>
-        <div className="roman" style={{ fontSize: 11, marginTop: 4 }}>
-          {vestingNote}
-        </div>
-      </div>
+        {/* ── Columna izquierda · patrimonio + composición ─── */}
+        <div className="fade fade-1">
+          <div className="label" style={{ marginBottom: 8 }}>Patrimonio neto</div>
 
-      <div className="rule" style={{ margin: '20px 0' }} />
+          {/* Héroe animado (client) */}
+          <InicioHero liquidos={liquidos} />
 
-      {/* ── Bloque 4 · FLUJO DEL MES ─────────────────────────── */}
-      <div className="label fade fade-5" style={{ marginBottom: 10 }}>
-        Flujo · {editorialMonth(now)}
-      </div>
-      <div
-        className="card fade fade-5"
-        style={{ padding: 16, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}
-      >
-        {/* Ingresos */}
-        <div>
-          <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Ingresos</div>
-          <div className="num" style={{ fontSize: 17, color: 'var(--signal-pos)' }}>
-            +{fmt(ingresosMes)} €
+          {/* Sub-línea editorial */}
+          <div className="display-it" style={{ marginTop: 8, fontSize: 14, color: 'var(--ink-3)' }}>
+            Disponible hoy · inmueble y opciones Nordex aparte
           </div>
-          {medianIncome != null && (
-            <div className="roman" style={{ fontSize: 10, marginTop: 3 }}>
-              mediana 3m · {fmt(medianIncome)} €
+
+          {/* Neto actual */}
+          <div className="roman" style={{ fontSize: 12, marginTop: 6 }}>
+            Neto actual ·{' '}
+            <span className="num" style={{ fontSize: 12 }}>{fmt(patrimonioNeto)} €</span>
+          </div>
+
+          {/* Δ temporal */}
+          {hasDelta && (
+            <div style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 5 }}>
+              <span
+                className="num"
+                style={{ fontSize: 11, color: deltaPos ? 'var(--signal-pos)' : 'var(--signal-neg)' }}
+              >
+                {deltaPos ? '+' : '\u2212'}{fmt(Math.abs(deltaNeto!))} €
+              </span>
+              <span className="label" style={{ fontSize: 9 }}>· 30 d</span>
             </div>
           )}
+
+          {/* Composición */}
+          <div className="rule" style={{ margin: '28px 0 14px' }} />
+          <div className="label" style={{ marginBottom: 12 }}>Composición</div>
+
+          {composicion.map((r) => (
+            <div
+              key={r.roman}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '24px 1fr 100px 50px',
+                gap: 14,
+                padding: '13px 0',
+                borderBottom: '1px solid var(--rule-2)',
+                alignItems: 'baseline',
+              }}
+            >
+              <span className="roman" style={{ fontSize: 12 }}>{r.roman}</span>
+              <div>
+                <div style={{ fontSize: 14.5, fontWeight: 500 }}>{r.name}</div>
+                {r.note && (
+                  <div className="roman" style={{ fontSize: 12 }}>{r.note}</div>
+                )}
+              </div>
+              <div
+                className="num"
+                style={{
+                  fontSize: 17,
+                  textAlign: 'right',
+                  color: r.neg ? 'var(--signal-neg)' : undefined,
+                }}
+              >
+                {r.neg ? '\u2212' : ''}{fmt(r.amount)} €
+              </div>
+              <div
+                className="num"
+                style={{ fontSize: 12, textAlign: 'right', color: 'var(--ink-3)' }}
+              >
+                {r.pct != null ? `${r.pct}%` : ''}
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* Fijos */}
-        <div style={{ textAlign: 'center' }}>
-          <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Fijos</div>
-          <div className="num" style={{ fontSize: 17 }}>
-            {fmt(fijosMes)} €
-          </div>
-        </div>
+        {/* ── Columna derecha · flujo + contingente ────────── */}
+        <div className="fade fade-2">
 
-        {/* Margen */}
-        <div style={{ textAlign: 'right' }}>
-          <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Margen</div>
-          <div
-            className="num"
-            style={{
-              fontSize: 17,
-              color: margenMes >= 0 ? 'var(--signal-pos)' : 'var(--signal-neg)',
-            }}
-          >
-            {margenMes >= 0 ? '+' : '\u2212'}{fmt(Math.abs(margenMes))} €
+          {/* Flujo card */}
+          <div className="card" style={{ padding: 22 }}>
+            <div className="label" style={{ marginBottom: 12 }}>
+              Flujo · {editorialMonth(now)}
+            </div>
+
+            {/* Ingresos + Fijos */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
+              <div>
+                <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Ingresos</div>
+                <div className="num pos" style={{ fontSize: 22 }}>
+                  +{fmt(ingresosMes)}
+                </div>
+                {medianIncome != null && (
+                  <div className="roman" style={{ fontSize: 10.5, marginTop: 3 }}>
+                    mediana 3m · {fmt(medianIncome)} €
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Fijos</div>
+                <div className="num neg" style={{ fontSize: 22 }}>{fmt(fijosMes)}</div>
+              </div>
+            </div>
+
+            <div className="rule" style={{ marginBottom: 12 }} />
+
+            <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Margen</div>
+            <div
+              className="display num"
+              style={{
+                fontSize: 38,
+                color: margenMes >= 0 ? 'var(--signal-pos)' : 'var(--signal-neg)',
+              }}
+            >
+              {margenMes >= 0 ? '+' : '\u2212'}{fmt(Math.abs(margenMes))}
+              <span style={{ fontSize: 14, color: 'var(--ink-3)' }}> €/mes</span>
+            </div>
           </div>
+
+          {/* Contingente · fuera del neto */}
+          <div style={{ marginTop: 18 }}>
+            <div className="label" style={{ marginBottom: 10 }}>
+              Contingente · fuera del neto
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr auto',
+                padding: '8px 0',
+                borderBottom: '1px solid var(--rule-2)',
+                alignItems: 'baseline',
+                gap: 14,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 13 }}>Opciones Nordex</div>
+                <div className="roman" style={{ fontSize: 10.5 }}>{vestingNote}</div>
+              </div>
+              <div className="num" style={{ fontSize: 13 }}>{fmt(stockIntrinsic)} €</div>
+            </div>
+          </div>
+
         </div>
       </div>
-
     </div>
   )
 }
