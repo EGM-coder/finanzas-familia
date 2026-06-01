@@ -1,4 +1,4 @@
-# EGMFin · SCHEMA.md — Fuente de verdad (31-may-2026)
+# EGMFin · SCHEMA.md — Fuente de verdad (1-jun-2026)
 
 > **Generado desde:** lectura directa de las 39 migraciones en `supabase/migrations/`  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible en este entorno.  
@@ -36,6 +36,9 @@
 
 ### `public.can_see_transaction(p_transaction_id uuid) → boolean`
 `sql SECURITY DEFINER STABLE` — Navega `transaction_splits → transactions → accounts`, verifica visibility con `auth.uid() IS NOT NULL`. Usada en: `transaction_splits`.
+
+### `public.can_see_order(p_order_id uuid) → boolean`
+`sql SECURITY DEFINER STABLE` — `auth.uid() IS NOT NULL AND EXISTS(SELECT 1 FROM purchase_orders WHERE id=p_order_id AND visibility matches)`. Usada en: `purchase_order_lines`.
 
 ### `public.capture_patrimonio_snapshot() → patrimonio_snapshots`
 `plpgsql SECURITY DEFINER` — Lee vista `patrimonio_neto`, hace UPSERT ON CONFLICT `(snapshot_date)`. `GRANT EXECUTE TO authenticated`.
@@ -119,7 +122,7 @@
 
 ---
 
-### 2.4 · `public.transactions` *(mig 02 + 07 + 22 + 24)*
+### 2.4 · `public.transactions` *(mig 02 + 07 + 22 + 24 + 38 + 39)*
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -135,17 +138,18 @@
 | `nature` | text | CHECK: `fijo_recurrente`, `variable_recurrente`, `extraordinario`, `inversion`, `ahorro`, `transferencia` (mig 24) |
 | `paid_by_user_id` | uuid FK auth.users(id) | ON DELETE RESTRICT |
 | `titular` | text NOT NULL | CHECK: `eric`, `ana`, `compartido` |
-| `source` | text NOT NULL | DEFAULT 'manual'; CHECK: `manual`, `csv`, `psd2`, `gmail_parse` |
+| `source` | text NOT NULL | DEFAULT 'manual'; CHECK: `manual`, `csv`, `psd2`, `gmail_parse`, `outlook_parse` (mig 39) |
 | `source_id` | text | |
 | `counterparty` | text | |
 | `is_reimbursable` | bool NOT NULL | mig 07; DEFAULT false |
 | `reimbursed_at` | timestamptz | mig 07 |
 | `bank_connection_id` | uuid FK bank_connections(id) | mig 22; ON DELETE SET NULL |
 | `external_id` | text | mig 22; UNIQUE PARTIAL con account_id WHERE NOT NULL |
+| `order_id` | uuid FK purchase_orders(id) | mig 38; ON DELETE SET NULL |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
-**Índices:** `transactions_date_idx` (date DESC), `transactions_account_date_idx` (account_id, date DESC), `transactions_category_idx` (category_id), `transactions_titular_date_idx` (titular, date DESC), `transactions_external_id_unique` UNIQUE PARTIAL (account_id, external_id) WHERE external_id IS NOT NULL.  
+**Índices:** `transactions_date_idx` (date DESC), `transactions_account_date_idx` (account_id, date DESC), `transactions_category_idx` (category_id), `transactions_titular_date_idx` (titular, date DESC), `transactions_external_id_unique` UNIQUE PARTIAL (account_id, external_id) WHERE external_id IS NOT NULL, `transactions_order_id_idx` (order_id) WHERE NOT NULL (mig 38).  
 **RLS:** Grupo D — `can_see_account(account_id)`.  
 **GRANTs (mig 22 Fase 3):** `authenticated` tiene SELECT, INSERT, UPDATE. Sin DELETE.
 
@@ -627,6 +631,77 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 
 ---
 
+### 2.27 · `public.purchase_orders` *(mig 35)*
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | gen_random_uuid() |
+| `source` | text NOT NULL | CHECK: `amazon_email`, `amazon_csv`, `paypal_email`, `paypal_csv`, `manual` |
+| `source_order_id` | text | |
+| `merchant` | text | |
+| `order_date` | date NOT NULL | |
+| `total_amount` | numeric(12,2) NOT NULL | |
+| `currency` | text NOT NULL | DEFAULT 'EUR' |
+| `titular` | text NOT NULL | CHECK: `eric`, `ana`, `compartido` |
+| `visibility` | text NOT NULL | CHECK: `privada_eric`, `privada_ana`, `compartida` |
+| `is_financed` | bool NOT NULL | DEFAULT false |
+| `installment_count` | int | nº de cuotas si is_financed |
+| `installment_amount` | numeric(12,2) | importe por cuota |
+| `first_charge_date` | date | fecha del primer cargo bancario |
+| `match_status` | text NOT NULL | DEFAULT 'sin_linkar'; CHECK: `sin_linkar`, `parcial`, `completo` |
+| `ai_suggested` | bool NOT NULL | DEFAULT false |
+| `notes` | text | |
+| `created_at` | timestamptz NOT NULL | DEFAULT now() |
+| `updated_at` | timestamptz NOT NULL | DEFAULT now(); trigger set_updated_at |
+
+**Índices:** `purchase_orders_source_id_unique` UNIQUE PARTIAL (source, source_order_id) WHERE NOT NULL; `purchase_orders_order_date_idx` (order_date DESC); `purchase_orders_match_status_idx` (match_status) WHERE != 'completo'; `purchase_orders_titular_idx` (titular).  
+**RLS:** SELECT/INSERT/UPDATE — `auth.uid() IS NOT NULL AND (visibility='privada_'||user_role() OR visibility='compartida')`.  
+**GRANTs:** SELECT, INSERT, UPDATE a `authenticated`.
+
+---
+
+### 2.28 · `public.purchase_order_lines` *(mig 36)*
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | |
+| `order_id` | uuid NOT NULL FK purchase_orders(id) | ON DELETE CASCADE |
+| `description` | text NOT NULL | |
+| `quantity` | int NOT NULL | DEFAULT 1 |
+| `unit_amount` | numeric(12,2) NOT NULL | |
+| `total_amount` | numeric(12,2) NOT NULL | |
+| `category_id` | uuid FK categories(id) | ON DELETE SET NULL |
+| `project_id` | uuid FK projects(id) | ON DELETE SET NULL |
+| `ai_suggested_category_id` | uuid FK categories(id) | ON DELETE SET NULL |
+| `category_confirmed` | bool NOT NULL | DEFAULT false |
+| `created_at` | timestamptz NOT NULL | |
+| `updated_at` | timestamptz NOT NULL | trigger set_updated_at |
+
+**Índices:** `purchase_order_lines_order_idx` (order_id); `purchase_order_lines_category_idx` (category_id).  
+**RLS:** SELECT/INSERT/UPDATE — `can_see_order(order_id)`.  
+**GRANTs:** SELECT, INSERT, UPDATE a `authenticated`.
+
+---
+
+### 2.29 · `public.purchase_order_charges` *(mig 37)*
+
+Enlace cuota bancaria ↔ pedido. Una transacción solo puede pertenecer a un pedido (UNIQUE en transaction_id).
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | |
+| `order_id` | uuid NOT NULL FK purchase_orders(id) | ON DELETE RESTRICT |
+| `transaction_id` | uuid NOT NULL FK transactions(id) | ON DELETE RESTRICT |
+| `installment_number` | int | nº de cuota (1-based) |
+| `match_method` | text NOT NULL | CHECK: `manual`, `ai_proposed`, `confirmed` |
+| `created_at` | timestamptz NOT NULL | DEFAULT now() |
+
+**Índices:** `purchase_order_charges_txn_unique` UNIQUE (transaction_id); `purchase_order_charges_order_idx` (order_id).  
+**RLS:** SELECT/INSERT/UPDATE — `can_see_transaction(transaction_id)`.  
+**GRANTs:** SELECT, INSERT, UPDATE a `authenticated`.
+
+---
+
 ## 3 · Vistas
 
 ### 3.1 · `public.account_balances` *(mig 09)*
@@ -805,6 +880,16 @@ Todas las columnas de `holdings` más:
 
 ---
 
+### 3.13 · `public.v_purchase_commitments` *(mig 38)*
+
+**Columnas:** `mes` date, `visibility` text, `comprometido_eur` numeric, `cuotas_pendientes` int.
+
+**Lógica:** Para pedidos financiados (`is_financed=true`, `match_status!='completo'`) con cuotas definidas, proyecta cuotas restantes mes a mes desde `first_charge_date + (cuotas_ya_pagadas + n − 1) meses`. Agrupa por mes y visibility.  
+**Nota:** `cuotas_pagadas` se cuenta desde `purchase_order_charges` por `order_id`.  
+**Security_invoker:** true.
+
+---
+
 ## 4 · GRANTs resumen por tabla
 
 | Tabla | authenticated SELECT | INSERT | UPDATE | DELETE | Notas |
@@ -834,6 +919,9 @@ Todas las columnas de `holdings` más:
 | `bank_account_links` | ✓ RLS | ✓ mig 23 | ✓ mig 23 | ✓ mig 24 | Grupo D |
 | `weekly_closures` | ✓ RLS | ✓ mig 30 | ✓ mig 30 | — | Grupo C, sin DELETE |
 | `monthly_closures` | ✓ RLS | ✓ mig 31 | ✓ mig 31 | — | Grupo C, sin DELETE |
+| `purchase_orders` | ✓ RLS | ✓ mig 35 | ✓ mig 35 | — | visibility tri-state |
+| `purchase_order_lines` | ✓ RLS | ✓ mig 36 | ✓ mig 36 | — | via can_see_order() |
+| `purchase_order_charges` | ✓ RLS | ✓ mig 37 | ✓ mig 37 | — | via can_see_transaction() |
 
 ---
 
@@ -883,6 +971,11 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260522000034 | `v_fixed_expenses_observed.sql` | v_fixed_expenses_observed |
 | 20260530000029 | `t019_v_spent_exclude_inversion.sql` | T-019: excluye nature='inversion' en v_spent_by_category_month; preserva NULL |
 | 20260530000030 | `grants_budgets_authenticated.sql` | INSERT/UPDATE en budgets (INV-6 — RLS sin GRANT = 42501 silencioso) |
+| 20260601000035 | `purchase_orders.sql` | purchase_orders + RLS visibility tri-state + trigger set_updated_at |
+| 20260601000036 | `purchase_order_lines.sql` | purchase_order_lines + can_see_order() helper |
+| 20260601000037 | `purchase_order_charges.sql` | purchase_order_charges — enlace txn ↔ pedido, UNIQUE (transaction_id) |
+| 20260601000038 | `transactions_order_id.sql` | transactions.order_id FK + v_purchase_commitments |
+| 20260601000039 | `transactions_source_outlook.sql` | Amplía CHECK transactions.source con outlook_parse |
 
 ---
 
