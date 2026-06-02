@@ -45,6 +45,7 @@ GMAIL_TOKEN_PATH          = os.getenv('GMAIL_TOKEN_PATH',
                                 os.path.expanduser('~/.secrets/gmail_token.json'))
 DRY_RUN                   = os.getenv('DRY_RUN', '0') == '1'
 DAYS_BACK_EMAIL           = int(os.getenv('DAYS_BACK_EMAIL', '90'))
+BACKFILL                  = os.getenv('BACKFILL', '0') == '1'
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
@@ -376,6 +377,17 @@ def _parse_paypal_lines(clean: str, merchant: str, total: float) -> list[dict]:
 
 # ── IA: propuesta de categoría ──────────────────────────────
 
+# Merchant-level map (lower-contains match on merchant field, checked first)
+MERCHANT_CATEGORY_MAP: list[tuple[str, str]] = [
+    ('apple',           'Streaming'),
+    ('google payment',  'Streaming'),
+    ('microsoft',       'Servicios y suministros'),
+    ('sony interactive','Ocio y cultura'),
+    ('iberia',          'Vuelos y transporte'),
+    ('leroy merlin',    'Mantenimiento'),
+]
+
+# Keyword-level map (fallback, matches description+merchant text)
 KEYWORD_MAP = {
     'alimentación':             ['supermercado','mercadona','lidl','eroski','carrefour','comida','aliment'],
     'ropa y cuidado personal':  ['ropa','camiseta','pantalón','zapato','zara','h&m','mango','camisa','vestido'],
@@ -387,6 +399,20 @@ KEYWORD_MAP = {
     'tecnología':               ['móvil','tablet','ordenador','auricular','cable','cargador','apple','samsung'],
     'vivienda':                 ['hogar','mueble','decoración','ikea','cojín','lámpara'],
 }
+
+
+def load_category_name_map() -> dict[str, str]:
+    """Returns {category_name_lower: uuid} for all active categories."""
+    cats = sb.table('categories').select('id, name').eq('is_active', True).execute().data or []
+    return {c['name'].lower(): c['id'] for c in cats}
+
+
+def suggest_merchant_category(merchant: str, cat_name_map: dict[str, str]) -> Optional[str]:
+    m = (merchant or '').lower()
+    for pattern, cat_name in MERCHANT_CATEGORY_MAP:
+        if pattern in m:
+            return cat_name_map.get(cat_name.lower())
+    return None
 
 
 def suggest_category(description: str, merchant: str, categories: list[dict]) -> Optional[str]:
@@ -414,7 +440,11 @@ def order_already_imported(source: str, source_order_id: Optional[str]) -> bool:
     return len(resp.data or []) > 0
 
 
-def insert_order_and_lines(parsed: dict, categories: list[dict]) -> Optional[str]:
+def insert_order_and_lines(
+    parsed: dict,
+    categories: list[dict],
+    cat_name_map: Optional[dict[str, str]] = None,
+) -> Optional[str]:
     order_data = parsed['order']
     lines_data = parsed['lines']
 
@@ -437,7 +467,12 @@ def insert_order_and_lines(parsed: dict, categories: list[dict]) -> Optional[str
 
     for line in lines_data:
         line['order_id'] = order_id
-        suggested = suggest_category(line['description'], order_data['merchant'], categories)
+        # Merchant map takes priority over keyword map
+        suggested = None
+        if cat_name_map:
+            suggested = suggest_merchant_category(order_data['merchant'], cat_name_map)
+        if not suggested:
+            suggested = suggest_category(line['description'], order_data['merchant'], categories)
         if suggested:
             line['ai_suggested_category_id'] = suggested
         try:
@@ -495,15 +530,72 @@ def propose_transaction_match(order_id: str, order_data: dict) -> int:
         return 0
 
 
+# ── Backfill ─────────────────────────────────────────────────
+
+def backfill_ai_suggestions(cat_name_map: dict[str, str]) -> None:
+    """Idempotent: only touches lines where ai_suggested_category_id IS NULL
+    AND category_confirmed = false AND category_id IS NULL."""
+    orders = sb.table('purchase_orders').select('id, merchant').execute().data or []
+    updated = skipped = 0
+    for order in orders:
+        merchant = order['merchant'] or ''
+        suggestion = suggest_merchant_category(merchant, cat_name_map)
+        if not suggestion:
+            skipped += 1
+            continue
+
+        lines = (
+            sb.table('purchase_order_lines')
+            .select('id')
+            .eq('order_id', order['id'])
+            .is_('ai_suggested_category_id', 'null')
+            .eq('category_confirmed', False)
+            .is_('category_id', 'null')
+            .execute()
+            .data or []
+        )
+        if not lines:
+            skipped += 1
+            continue
+
+        cat_name = next(
+            (name for pat, name in MERCHANT_CATEGORY_MAP if pat in merchant.lower()), '?'
+        )
+        if DRY_RUN:
+            logger.info(
+                f"  🔬 BACKFILL {merchant[:40]} → {cat_name} ({len(lines)} líneas)"
+            )
+            updated += len(lines)
+            continue
+
+        for line in lines:
+            sb.table('purchase_order_lines') \
+                .update({'ai_suggested_category_id': suggestion}) \
+                .eq('id', line['id']) \
+                .execute()
+        logger.info(
+            f"  ✅ BACKFILL {merchant[:40]} → {cat_name} ({len(lines)} líneas)"
+        )
+        updated += len(lines)
+
+    logger.info(f'🗂  Backfill · {updated} líneas actualizadas · {skipped} pedidos sin mapa')
+
+
 # ── Main ────────────────────────────────────────────────────
 
 def run():
     mode = '🔬 DRY-RUN' if DRY_RUN else '🔄 LIVE'
     logger.info(f'{mode} parse_orders_gmail — últimos {DAYS_BACK_EMAIL} días')
 
-    service    = get_gmail_service()
-    categories = load_categories()
+    cat_name_map = load_category_name_map()
+    categories   = load_categories()
     logger.info(f'📂 {len(categories)} categorías cargadas')
+
+    if BACKFILL:
+        logger.info('🗂  Modo BACKFILL activado')
+        backfill_ai_suggestions(cat_name_map)
+
+    service = get_gmail_service()
 
     messages = search_emails(service, DAYS_BACK_EMAIL)
     logger.info(f'📧 {len(messages)} emails candidatos')
@@ -539,7 +631,7 @@ def run():
             f"{len(parsed['lines'])} líneas"
         )
 
-        order_id = insert_order_and_lines(parsed, categories)
+        order_id = insert_order_and_lines(parsed, categories, cat_name_map)
         total_orders += 1
         total_lines  += len(parsed['lines'])
         if order_id:
