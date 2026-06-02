@@ -48,6 +48,7 @@ Si hay 0 ✗ y 0 DUDA, el arquitecto valida directamente. Si hay alguno, el arqu
 - **INV-4** · Cero DDL no autorizada: no crear tablas, columnas, enums ni vistas. Si una vista nueva fue autorizada explícitamente, va por migración + `SCHEMA.md` en el mismo commit.
 - **INV-5** · Sin DELETE (integridad histórica). Archivar (`is_active=false`), no borrar.
 - **INV-6** · Grants de tabla para escritura. Si el paso introduce escritura del frontend (INSERT/UPDATE/DELETE) sobre una tabla, verificar que el rol `authenticated` tiene el GRANT correspondiente a nivel de tabla (`information_schema.role_table_grants`), no solo la política RLS. RLS sin GRANT produce 42501 'permission denied' silencioso (200 + 0 filas). Evidencia requerida: nombre de tabla + privilegios de `authenticated` confirmados, o migración GRANT incluida en el mismo bloque.
+- **INV-7** · Toda categoría de usuario —padre o hija— debe ser seleccionable de inmediato donde se asignan categorías (`CategoryCombobox`). El combobox no puede asumir una jerarquía de exactamente 2 niveles (raíz → hoja directa); debe manejar hojas a cualquier profundidad y raíces sin hijos. Verificar tras crear cualquier categoría nueva que aparece en el selector de Control y de Pedidos.
 
 ## 3 · Reglas de cálculo y semántica del dinero (donde se cuelan los bugs)
 

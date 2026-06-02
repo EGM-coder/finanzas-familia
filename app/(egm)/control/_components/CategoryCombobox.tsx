@@ -38,14 +38,35 @@ export function CategoryCombobox({ categories, value, onChange }: Props) {
     return () => document.removeEventListener('keydown', handler)
   }, [])
 
-  const parents = categories.filter(c => c.parent_id === null)
-  const leaves  = categories.filter(c => c.parent_id !== null)
+  // IDs that are referenced as parent_id by at least one other category
+  const branchIds = new Set(
+    categories.filter(c => c.parent_id !== null).map(c => c.parent_id as string)
+  )
 
-  const selectedLeaf = value ? categories.find(c => c.id === value) : null
+  // Walk up the tree to find the root ancestor (parent_id === null)
+  function rootAncestor(c: Category): Category {
+    if (c.parent_id === null) return c
+    const p = categories.find(x => x.id === c.parent_id)
+    return p ? rootAncestor(p) : c
+  }
 
-  const parentColor = (parentId: string | null): string => {
-    if (!parentId) return 'var(--ink-4)'
-    return categories.find(c => c.id === parentId)?.color ?? 'var(--ink-4)'
+  // Root-level categories (group headings)
+  const roots = categories.filter(c => c.parent_id === null)
+
+  // Selectable: any category that has no children (leaf at any depth, including depth 0)
+  const selectables = categories.filter(c => !branchIds.has(c.id))
+
+  const selectedCat = value ? categories.find(c => c.id === value) : null
+
+  const dotColor = (c: Category): string => {
+    // Use own color, then walk up to find the first ancestor with a color
+    if (c.color) return c.color
+    let cur: Category | undefined = categories.find(x => x.id === c.parent_id)
+    while (cur) {
+      if (cur.color) return cur.color
+      cur = categories.find(x => x.id === cur!.parent_id)
+    }
+    return 'var(--ink-4)'
   }
 
   return (
@@ -69,24 +90,24 @@ export function CategoryCombobox({ categories, value, onChange }: Props) {
             justifyContent: 'space-between',
             fontFamily: 'var(--sans)',
             fontSize: 14,
-            color: selectedLeaf ? 'var(--ink-1)' : 'var(--ink-3)',
+            color: selectedCat ? 'var(--ink-1)' : 'var(--ink-3)',
             borderRadius: 0,
             transition: 'border-color 150ms ease',
             outline: 'none',
           }}
         >
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {selectedLeaf && (
+            {selectedCat && (
               <span style={{
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                background: parentColor(selectedLeaf.parent_id),
+                background: dotColor(selectedCat),
                 flexShrink: 0,
                 display: 'inline-block',
               }} />
             )}
-            {selectedLeaf ? selectedLeaf.name : 'Sin categoría'}
+            {selectedCat ? selectedCat.name : 'Sin categoría'}
           </span>
           {/* Chevron SVG — rota 180° cuando abierto */}
           <svg
@@ -180,21 +201,21 @@ export function CategoryCombobox({ categories, value, onChange }: Props) {
                 Sin resultados.
               </Command.Empty>
 
-              {parents.map(parent => {
-                const children = leaves.filter(l => l.parent_id === parent.id)
-                if (children.length === 0) return null
+              {roots.map(root => {
+                const items = selectables.filter(c => rootAncestor(c).id === root.id)
+                if (items.length === 0) return null
                 return (
                   <Command.Group
-                    key={parent.id}
-                    heading={parent.name}
+                    key={root.id}
+                    heading={root.name}
                     style={{ listStyle: 'none', margin: 0, padding: 0 }}
                   >
-                    {children.map(leaf => (
+                    {items.map(cat => (
                       <Command.Item
-                        key={leaf.id}
-                        value={`${parent.name} ${leaf.name}`}
+                        key={cat.id}
+                        value={`${root.name} ${cat.name}`}
                         onSelect={() => {
-                          onChange(leaf.id)
+                          onChange(cat.id)
                           setOpen(false)
                         }}
                         style={{
@@ -214,11 +235,11 @@ export function CategoryCombobox({ categories, value, onChange }: Props) {
                           width: 8,
                           height: 8,
                           borderRadius: '50%',
-                          background: parent.color ?? 'var(--ink-4)',
+                          background: dotColor(cat),
                           flexShrink: 0,
                           display: 'inline-block',
                         }} />
-                        {leaf.name}
+                        {cat.name}
                       </Command.Item>
                     ))}
                   </Command.Group>
