@@ -895,7 +895,7 @@ Todas las columnas de `holdings` más:
 | Tabla | authenticated SELECT | INSERT | UPDATE | DELETE | Notas |
 |---|---|---|---|---|---|
 | `accounts` | ✓ RLS | ✓ RLS | ✓ RLS | — | Grupo C |
-| `categories` | ✓ RLS | ✓ RLS | ✓ RLS | — | Grupo C |
+| `categories` | ✓ RLS | ✓ mig 40 | ✓ mig 40 | — | Grupo C |
 | `projects` | ✓ | ✓ | ✓ | — | |
 | `transactions` | ✓ RLS | ✓ mig 22 | ✓ mig 22 | — | Sin DELETE |
 | `transaction_splits` | ✓ RLS | ✓ RLS | ✓ RLS | — | |
