@@ -240,6 +240,14 @@ El job de sync (`sync_psd2.py`) terminaba con exit 0 (verde en GitHub Actions) a
 
 ---
 
+## Doctrinas activas
+
+| ID | Doctrina | Registrada |
+|----|----------|------------|
+| D-005 | **Fuente única de categoría en Pedidos.** La categoría de un cargo PayPal/Amazon vive en UN SOLO SITIO: `transactions.category_id` del cargo enlazado. `purchase_orders` no guarda copia. Flujo: (1) si el pedido tiene cargo confirmado o manual → leer/escribir `transactions.category_id`; (2) si no tiene cargo → leer/escribir `purchase_order_lines.category_id` como provisional; (3) en el instante del enlace (`confirmMatch` o `linkManual`) → volcar la categoría provisional de la línea al cargo. Implementado en `app/(egm)/pedidos/_actions/pedidos.ts` · `updateOrderCategory`, `confirmMatch`, `linkManual`. | T-022a · 02-jun-2026 |
+
+---
+
 ## Deuda técnica pendiente
 
 | ID | Descripción | Prioridad |
@@ -249,3 +257,4 @@ El job de sync (`sync_psd2.py`) terminaba con exit 0 (verde en GitHub Actions) a
 | D-003 | ~~`app/api/callback/route.ts` y `app/api/bank/` usan schema Copilot~~ — **OBSOLETA** (31-may-2026): `app/api/` no existe en el repo. Nada que limpiar. | — |
 | D-004 | ~~`supabase/seed/` no existe~~ — **OBSOLETA** (31-may-2026): `supabase/seed/` existe y contiene `seed_accounts.sql` y `seed_holdings.sql`. | — |
 | T-019 | **RESUELTA** (mig 29, 30-may-2026). Ver entrada T-019 arriba. | — |
+| T-022a-pend | **Pendientes de T-022a:** (a) T-025 extracción de líneas Amazon; (b) T-026 auto-match cuotas financiadas; (c) slice-1b map comercio→categoría IA para `ai_suggested_category_id`; (d) PV-3 indicador compromisos en Control; (e) Splits multi-categoría por pedido. | Media |
