@@ -240,6 +240,30 @@ El job de sync (`sync_psd2.py`) terminaba con exit 0 (verde en GitHub Actions) a
 
 ---
 
+## P-017 · 02-jun-2026 · **ACTIVO** (regla permanente)
+**SCHEMA.md §4 declaró GRANTs que no existían → drift invalidó un diagnóstico**
+
+`categories` aparecía en §4 con `✓ RLS` en INSERT/UPDATE. Esa marca se escribió por inferencia ("Grupo C, debería tener GRANT") sin verificar contra las migraciones reales. Resultado: al diagnosticar el error de creación de categorías, la primera hipótesis fue "no es 42501 porque §4 dice que el GRANT existe" — lo que retrasó el diagnóstico correcto.
+
+**Causa raíz del drift:** §4 se escribe manualmente y se actualiza solo cuando un GRANT falla en producción. Las tablas que nunca tuvieron un flujo UI de escritura mantienen la marca `✓ RLS` aunque el GRANT real no exista en ninguna migración.
+
+**Regla:** al marcar `✓` en §4, la fuente de verdad debe ser el `grep` de migraciones, no la inferencia. Formato correcto: `✓ mig N` si hay GRANT explícito, `✗` si no lo hay. `✓ RLS` solo debe usarse si una migration previa ya añadió el GRANT implícitamente (caso poco probable — documentarlo si ocurre).
+
+**Auditoría pendiente:** otras filas de §4 con `✓ RLS` en INSERT/UPDATE deben verificarse contra migraciones. Candidatos con riesgo: `savings_goals`, `assets`, `liabilities`, `incomes`, `work_abroad_days`, `transaction_splits` — ninguna tiene migración de GRANT explícita.
+
+---
+
+## P-018 · 02-jun-2026 · **DEUDA LATENTE** (no arreglar aún)
+**`accounts` (mig 01) carece de GRANT INSERT/UPDATE para `authenticated`**
+
+`accounts` está en la misma migración que `categories` (mig 01 `maestros.sql`) y tiene el mismo problema estructural: ninguna migración añade `GRANT INSERT, UPDATE ON accounts TO authenticated`. La tabla funciona en lectura (SELECT existe), pero cualquier flujo UI de creación/edición de cuentas fallará con 42501.
+
+**Por qué no se arregla ahora:** no existe flujo UI de escritura sobre `accounts` para usuarios autenticados (las cuentas se crean manualmente en Supabase Dashboard con service role, o via Python jobs). Añadir el GRANT de forma especulativa, sin el flujo que lo necesita, viola el principio de no añadir lo que no se usa.
+
+**Acción cuando se construya el flujo:** añadir `GRANT INSERT, UPDATE ON public.accounts TO authenticated` en la misma migración que el flujo UI de creación de cuentas (p.ej. panel de cuentas de Ana, o gestión de cuentas en /configuracion). No antes.
+
+---
+
 ## Doctrinas activas
 
 | ID | Doctrina | Registrada |
