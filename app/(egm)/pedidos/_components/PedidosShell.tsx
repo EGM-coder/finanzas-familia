@@ -21,12 +21,35 @@ function sourceLabel(source: string): string {
   return ({ amazon_email: 'Amazon', amazon_csv: 'Amazon CSV', paypal_email: 'PayPal', paypal_csv: 'PayPal CSV', manual: 'Manual' } as Record<string,string>)[source] ?? source
 }
 
-function hasConfirmed(order: Pedido): boolean {
-  return order.purchase_order_charges.some(c => c.match_method === 'confirmed' || c.match_method === 'manual')
+function enlaceIndicator(order: Pedido): '○' | '◐' | '●' {
+  if (order.match_status === 'completo') return '●'
+  if (order.match_status === 'parcial') return '◐'
+  return '○'
 }
 
-function hasPending(order: Pedido): boolean {
-  return !hasConfirmed(order) && order.purchase_order_charges.some(c => c.match_method === 'ai_proposed')
+function enlaceLabel(order: Pedido): string {
+  if (order.match_status === 'completo') return 'enlazado'
+  if (order.match_status === 'parcial') return 'enlace parcial'
+  const hasProp = order.purchase_order_charges.some(c => c.match_method === 'ai_proposed')
+  return hasProp ? 'confirmar enlace' : 'sin enlazar'
+}
+
+function pagoLabel(order: Pedido): string | null {
+  if (!order.is_financed || !order.installment_count) return null
+  const n = order.purchase_order_charges.filter(
+    c => c.match_method === 'confirmed' || c.match_method === 'manual',
+  ).length
+  const m = order.installment_count
+  if (n >= m) return '● pagado'
+  return `pagando ${n}/${m}`
+}
+
+function clasificacionOk(order: Pedido): boolean {
+  const conf = order.purchase_order_charges.find(
+    c => c.match_method === 'confirmed' || c.match_method === 'manual',
+  )
+  if (conf) return conf.transactions?.category_id !== null
+  return order.purchase_order_lines.some(l => l.category_id !== null)
 }
 
 // ── Component ─────────────────────────────────────────────────
@@ -40,8 +63,8 @@ export function PedidosShell({ orders, categories }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selectedOrder = selectedId ? (orders.find(o => o.id === selectedId) ?? null) : null
 
-  const nLinked  = orders.filter(hasConfirmed).length
-  const nPending = orders.filter(hasPending).length
+  const nCompleto = orders.filter(o => o.match_status === 'completo').length
+  const nParcial  = orders.filter(o => o.match_status === 'parcial').length
 
   return (
     <>
@@ -49,9 +72,9 @@ export function PedidosShell({ orders, categories }: Props) {
       <div style={{ display: 'flex', gap: 20, marginBottom: 24, alignItems: 'baseline' }}>
         <span className="label">{orders.length} pedidos</span>
         <span className="roman" style={{ fontSize: 12 }}>
-          {nLinked} enlazados
-          {nPending > 0 && (
-            <> · <span style={{ color: 'var(--signal-warn)' }}>{nPending} por confirmar</span></>
+          {nCompleto} enlazados
+          {nParcial > 0 && (
+            <> · <span style={{ color: 'var(--signal-warn)' }}>{nParcial} enlace parcial</span></>
           )}
         </span>
       </div>
@@ -59,8 +82,12 @@ export function PedidosShell({ orders, categories }: Props) {
       {/* Lista */}
       <div style={{ borderTop: '1px solid var(--rule)' }}>
         {orders.map(order => {
-          const linked  = hasConfirmed(order)
-          const pending = hasPending(order)
+          const indicator   = enlaceIndicator(order)
+          const enlaceTxt   = enlaceLabel(order)
+          const pagoTxt     = pagoLabel(order)
+          const clasificado  = clasificacionOk(order)
+          const isPending   = order.match_status === 'sin_linkar' &&
+            order.purchase_order_charges.some(c => c.match_method === 'ai_proposed')
 
           return (
             <button
@@ -86,13 +113,13 @@ export function PedidosShell({ orders, categories }: Props) {
               onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.02)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
-              {/* Indicador ○/● — ink-3, no usar color como única señal */}
+              {/* Indicador enlace ○/◐/● */}
               <span
                 className="num"
-                aria-label={linked ? 'Enlazado' : 'Sin enlazar'}
+                aria-label={enlaceTxt}
                 style={{ color: 'var(--ink-3)', fontSize: 13, lineHeight: 1, userSelect: 'none' }}
               >
-                {linked ? '●' : '○'}
+                {indicator}
               </span>
 
               {/* Cuerpo */}
@@ -107,22 +134,22 @@ export function PedidosShell({ orders, categories }: Props) {
                   <span className="label" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
                     {sourceLabel(order.source)}
                   </span>
-                  {linked && (
-                    <span className="label" style={{ fontSize: 9, color: 'var(--ink-3)' }}>
-                      · enlazado
-                    </span>
-                  )}
-                  {pending && (
-                    <span className="label" style={{ fontSize: 9, color: 'var(--signal-warn)' }}>
-                      · confirmar enlace
-                    </span>
-                  )}
+                  <span className="label" style={{ fontSize: 9, color: isPending ? 'var(--signal-warn)' : 'var(--ink-3)' }}>
+                    · {enlaceTxt}
+                  </span>
                 </div>
-                <div className="roman" style={{ fontSize: 12, marginTop: 3 }}>
-                  {fmtDate(order.order_date)}
+                {/* Segunda línea: fecha · cuotas · pago · clasificación */}
+                <div className="roman" style={{ fontSize: 12, marginTop: 3, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                  <span>{fmtDate(order.order_date)}</span>
                   {order.is_financed && order.installment_count && (
-                    <> · {order.installment_count}&thinsp;×&thinsp;<span className="num">{fmtAmount(order.installment_amount ?? 0)}</span>&thinsp;€</>
+                    <span>· {order.installment_count}&thinsp;×&thinsp;<span className="num">{fmtAmount(order.installment_amount ?? 0)}</span>&thinsp;€</span>
                   )}
+                  {pagoTxt && (
+                    <span style={{ color: 'var(--ink-3)' }}>· {pagoTxt}</span>
+                  )}
+                  <span style={{ color: clasificado ? 'var(--ink-3)' : 'var(--signal-warn)' }}>
+                    · {clasificado ? '● cat.' : '◐ sin cat.'}
+                  </span>
                 </div>
               </div>
 

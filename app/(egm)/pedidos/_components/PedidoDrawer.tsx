@@ -287,15 +287,50 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
                       {order.first_charge_date && <> · desde {fmtDate(order.first_charge_date)}</>}
                     </div>
                   )}
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <span className="label" style={{ fontSize: 9 }}>Estado</span>
-                    <span className="roman" style={{ fontSize: 12 }}>
-                      {confirmed
-                        ? '● Enlazado'
-                        : aiProposed
-                          ? '○ Enlace pendiente de confirmar'
-                          : '○ Sin enlazar'}
-                    </span>
+                  {/* Tres ejes de estado — D-005 */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {/* Enlace */}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                      <span className="label" style={{ fontSize: 9, color: 'var(--ink-4)', minWidth: 72 }}>Enlace</span>
+                      <span className="roman" style={{ fontSize: 12 }}>
+                        {order.match_status === 'completo'
+                          ? '● Enlazado'
+                          : order.match_status === 'parcial'
+                            ? '◐ Enlace parcial'
+                            : aiProposed
+                              ? '○ Propuesto — por confirmar'
+                              : '○ Sin enlazar'}
+                      </span>
+                    </div>
+                    {/* Pago (solo si financiado) */}
+                    {order.is_financed && order.installment_count && (() => {
+                      const n = order.purchase_order_charges.filter(
+                        c => c.match_method === 'confirmed' || c.match_method === 'manual',
+                      ).length
+                      const m = order.installment_count
+                      return (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                          <span className="label" style={{ fontSize: 9, color: 'var(--ink-4)', minWidth: 72 }}>Pago</span>
+                          <span className="roman" style={{ fontSize: 12 }}>
+                            {n >= m ? '● Pagado' : `pagando ${n}/${m} cuotas`}
+                          </span>
+                        </div>
+                      )
+                    })()}
+                    {/* Clasificación */}
+                    {(() => {
+                      const ok = confirmed
+                        ? confirmed.transactions?.category_id !== null
+                        : order.purchase_order_lines.some(l => l.category_id !== null)
+                      return (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                          <span className="label" style={{ fontSize: 9, color: 'var(--ink-4)', minWidth: 72 }}>Clasificación</span>
+                          <span className="roman" style={{ fontSize: 12 }}>
+                            {ok ? '● Categorizado' : '◐ Sin categoría'}
+                          </span>
+                        </div>
+                      )
+                    })()}
                   </div>
                   {order.source_order_id && (
                     <div className="roman" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
