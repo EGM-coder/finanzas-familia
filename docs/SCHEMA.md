@@ -976,6 +976,8 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260601000037 | `purchase_order_charges.sql` | purchase_order_charges — enlace txn ↔ pedido, UNIQUE (transaction_id) |
 | 20260601000038 | `transactions_order_id.sql` | transactions.order_id FK + v_purchase_commitments |
 | 20260601000039 | `transactions_source_outlook.sql` | Amplía CHECK transactions.source con outlook_parse |
+| 20260602000040 | `grants_categories_authenticated.sql` | GRANT INSERT, UPDATE on categories TO authenticated (INV-6) |
+| 20260603000041 | `backfill_first_charge_date.sql` | T-026a: first_charge_date = order_date para financiados (data migration) |
 
 ---
 

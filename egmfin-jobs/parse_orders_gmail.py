@@ -178,7 +178,7 @@ def parse_amazon_email(subject: str, body: str, date_str: str) -> Optional[dict]
             'is_financed': financing is not None,
             'installment_count':  financing['installment_count']  if financing else None,
             'installment_amount': financing['installment_amount'] if financing else None,
-            'first_charge_date':  financing['first_charge_date']  if financing else None,
+            'first_charge_date':  order_date if financing else None,
             'match_status': 'sin_linkar',
             'ai_suggested': False,
         },
@@ -230,7 +230,6 @@ def _parse_amazon_financing(body: str) -> Optional[dict]:
         return {
             'installment_count': int(m.group(1)),
             'installment_amount': float(m.group(2).replace(',', '.')),
-            'first_charge_date': datetime.now(timezone.utc).strftime('%Y-%m-%d'),
         }
     return None
 
@@ -299,7 +298,7 @@ def parse_paypal_email(subject: str, body: str, date_str: str) -> Optional[dict]
             'is_financed': financing is not None,
             'installment_count':  financing['installment_count']  if financing else None,
             'installment_amount': financing['installment_amount'] if financing else None,
-            'first_charge_date':  financing['first_charge_date']  if financing else None,
+            'first_charge_date':  order_date if financing else None,
             'match_status': 'sin_linkar',
             'ai_suggested': False,
         },
@@ -317,7 +316,6 @@ def _parse_paypal_financing(clean: str, total: float) -> Optional[dict]:
         return {
             'installment_count': int(m.group(1)),
             'installment_amount': float(m.group(2).replace(',', '.')),
-            'first_charge_date': datetime.now(timezone.utc).strftime('%Y-%m-%d'),
         }
     # "Paga en N plazos" / "Dividido en N pagos" sin importe explícito → total / N
     m2 = re.search(
@@ -329,7 +327,6 @@ def _parse_paypal_financing(clean: str, total: float) -> Optional[dict]:
         return {
             'installment_count': count,
             'installment_amount': round(total / count, 2),
-            'first_charge_date': datetime.now(timezone.utc).strftime('%Y-%m-%d'),
         }
     return None
 
