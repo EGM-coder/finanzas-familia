@@ -201,20 +201,26 @@ function LedgerRow({
         }}
       />
 
-      {/* Contrapartida */}
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          fontSize: 13,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          color: row.categories ? 'var(--ink)' : 'var(--ink-3)',
-        }}
-      >
-        {label}
-      </span>
+      {/* Contrapartida + PV-3 */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            color: row.categories ? 'var(--ink)' : 'var(--ink-3)',
+          }}
+        >
+          {label}
+        </div>
+        {/* PV-3: indicador de vinculación a pedido */}
+        <div className="roman" style={{ fontSize: 10, marginTop: 1, color: 'var(--ink-4)' }}>
+          {row.order_id
+            ? `● ${row.purchase_orders?.merchant ?? '—'}`
+            : '○ Cargo sin vincular'}
+        </div>
+      </div>
 
       {row.por_revisar && <ReviewBadge />}
 

@@ -24,6 +24,8 @@ export interface Row {
   accounts: { institution: string; name: string } | null
   categories: Category | null
   projects: { id: string; name: string } | null
+  order_id: string | null
+  purchase_orders: { merchant: string | null } | null
 }
 
 interface Props {
