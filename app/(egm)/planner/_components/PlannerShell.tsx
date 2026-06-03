@@ -9,7 +9,7 @@ import { PlannerDonut } from './PlannerDonut'
 import { PlannerNarrative } from './PlannerNarrative'
 import { PlannerTrend } from './PlannerTrend'
 import { AdvisorSlot } from './AdvisorSlot'
-import { type PlannerData } from '../page'
+import { type PlannerData } from '../../_lib/plannerUtils'
 
 interface Props {
   data: PlannerData
@@ -128,7 +128,7 @@ export function PlannerShell({ data, userId, mes, maristasProjectId }: Props) {
           label="Inversiones"
           value={data.inversiones}
           tone={data.inversiones > 0 ? 'positive' : 'neutral'}
-          onClick={() => nav(`/control?mes=${mes}&nature=inversion`)}
+          onClick={() => nav(`/control?mes=${mes}&nature=inversion&view=apuntes`)}
         />
         <PlannerCard
           label="Proyecto Maristas"
@@ -136,7 +136,7 @@ export function PlannerShell({ data, userId, mes, maristasProjectId }: Props) {
           tone={data.maristas > 0 ? 'positive' : 'neutral'}
           onClick={
             maristasProjectId
-              ? () => nav(`/control?mes=${mes}&project_id=${maristasProjectId}`)
+              ? () => nav(`/control?mes=${mes}&project_id=${maristasProjectId}&view=apuntes`)
               : undefined
           }
         />
@@ -156,7 +156,7 @@ export function PlannerShell({ data, userId, mes, maristasProjectId }: Props) {
                 key={nature ?? 'null'}
                 className={navigable ? 'planner-nav-row' : undefined}
                 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}
-                onClick={navigable ? () => nav(`/control?mes=${mes}&nature=${nature}`) : undefined}
+                onClick={navigable ? () => nav(`/control?mes=${mes}&nature=${nature}&view=apuntes`) : undefined}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div
@@ -182,7 +182,7 @@ export function PlannerShell({ data, userId, mes, maristasProjectId }: Props) {
                 marginTop: 4, paddingTop: 8, borderTop: '1px solid var(--rule-2)',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
               }}
-              onClick={() => nav(`/control?mes=${mes}&category_root=supermercado`)}
+              onClick={() => nav(`/control?mes=${mes}&view=apuntes`)}
             >
               <span className="roman" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
                 Supermercado
