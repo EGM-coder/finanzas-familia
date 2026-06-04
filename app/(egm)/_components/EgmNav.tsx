@@ -5,20 +5,19 @@ import { usePathname } from 'next/navigation'
 type Module = {
   n: string
   label: string
-  href: string | null
+  href: string | null  // null = disabled (no clicable, atenuado)
 }
 
+// Módulos canónicos del Dossier V3 — orden y numeración exactos.
+// Pedidos y Presupuesto se acceden desde dentro de Control, no desde la nav.
 const MODULES: Module[] = [
-  { n: 'I',    label: 'Inicio',      href: '/inicio' },
-  { n: 'II',   label: 'Control',     href: '/control' },
-  { n: 'III',  label: 'Pedidos',     href: '/pedidos' },
-  { n: 'IV',   label: 'Horizonte',   href: '/planner' },
-  { n: 'V',    label: 'Presupuesto', href: '/budget' },
-  { n: 'VI',   label: 'Maristas',    href: null },
-  { n: 'VII',  label: 'Asesor IA',   href: null },
+  { n: 'I',   label: 'Inicio',    href: '/inicio' },
+  { n: 'II',  label: 'Proyecto',  href: null },
+  { n: 'III', label: 'Control',   href: '/control' },
+  { n: 'IV',  label: 'Horizonte', href: null },
+  { n: 'V',   label: 'Análisis',  href: null },
+  { n: 'VI',  label: 'Ajustes',   href: '/configuracion' },
 ]
-
-const TAB_MODULES = MODULES.filter((m): m is Module & { href: string } => m.href !== null)
 
 export function EgmNav() {
   const pathname = usePathname()
@@ -50,38 +49,7 @@ export function EgmNav() {
         <div className="label" style={{ marginBottom: 30 }}>Dossier vivo · v3.0</div>
 
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {MODULES.map(m => {
-            const active = isActive(m.href)
-            const sharedStyle: React.CSSProperties = {
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: 10,
-              padding: '7px 0 7px 10px',
-              marginLeft: -12,
-              borderLeft: active ? '2px solid var(--ink)' : '2px solid transparent',
-              color: active ? 'var(--ink)' : m.href ? 'var(--ink-3)' : 'var(--ink-4)',
-              textDecoration: 'none',
-              cursor: m.href ? 'pointer' : 'default',
-            }
-            const content = (
-              <>
-                <span
-                  className="roman"
-                  style={{ fontSize: 11, minWidth: 22, color: active ? 'var(--ink)' : 'var(--ink-4)' }}
-                >
-                  {m.n}
-                </span>
-                <span style={{ fontSize: 13, fontWeight: active ? 500 : 400 }}>
-                  {m.label}
-                </span>
-              </>
-            )
-            return m.href ? (
-              <Link key={m.n} href={m.href} style={sharedStyle}>{content}</Link>
-            ) : (
-              <span key={m.n} style={sharedStyle}>{content}</span>
-            )
-          })}
+          {MODULES.map(m => renderSidebarItem(m, isActive(m.href)))}
         </nav>
       </aside>
 
@@ -101,29 +69,69 @@ export function EgmNav() {
           justifyContent: 'space-around',
         }}
       >
-        {TAB_MODULES.map(m => {
-          const active = isActive(m.href)
-          return (
-            <Link
-              key={m.n}
-              href={m.href}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 3,
-                color: active ? 'var(--ink)' : 'var(--ink-4)',
-                textDecoration: 'none',
-                padding: '4px 0',
-                minWidth: 50,
-              }}
-            >
-              <span className="roman" style={{ fontSize: 14 }}>{m.n}</span>
-              <span className="label" style={{ fontSize: 8.5, letterSpacing: '0.1em' }}>{m.label}</span>
-            </Link>
-          )
-        })}
+        {MODULES.map(m => renderTabItem(m, isActive(m.href)))}
       </nav>
     </>
+  )
+}
+
+// ── Renderers ────────────────────────────────────────────────
+
+function renderSidebarItem(m: Module, active: boolean) {
+  const disabled = m.href === null
+  const style: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 10,
+    padding: '7px 0 7px 10px',
+    marginLeft: -12,
+    borderLeft: active ? '2px solid var(--ink)' : '2px solid transparent',
+    color: active ? 'var(--ink)' : disabled ? 'var(--ink-4)' : 'var(--ink-3)',
+    textDecoration: 'none',
+    cursor: disabled ? 'default' : 'pointer',
+  }
+  const content = (
+    <>
+      <span
+        className="roman"
+        style={{ fontSize: 11, minWidth: 22, color: active ? 'var(--ink)' : 'var(--ink-4)' }}
+      >
+        {m.n}
+      </span>
+      <span style={{ fontSize: 13, fontWeight: active ? 500 : 400 }}>
+        {m.label}
+      </span>
+    </>
+  )
+  return m.href ? (
+    <Link key={m.n} href={m.href} style={style}>{content}</Link>
+  ) : (
+    <span key={m.n} style={style} aria-disabled="true">{content}</span>
+  )
+}
+
+function renderTabItem(m: Module, active: boolean) {
+  const disabled = m.href === null
+  const style: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 3,
+    color: active ? 'var(--ink)' : disabled ? 'var(--ink-4)' : 'var(--ink-4)',
+    textDecoration: 'none',
+    padding: '4px 0',
+    minWidth: 40,
+    cursor: disabled ? 'default' : 'pointer',
+  }
+  const content = (
+    <>
+      <span className="roman" style={{ fontSize: 13 }}>{m.n}</span>
+      <span className="label" style={{ fontSize: 7.5, letterSpacing: '0.08em' }}>{m.label}</span>
+    </>
+  )
+  return m.href ? (
+    <Link key={m.n} href={m.href} style={style}>{content}</Link>
+  ) : (
+    <span key={m.n} style={style} aria-disabled="true">{content}</span>
   )
 }
