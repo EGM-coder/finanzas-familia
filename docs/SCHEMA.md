@@ -122,7 +122,7 @@
 
 ---
 
-### 2.4 · `public.transactions` *(mig 02 + 07 + 22 + 24 + 38 + 39)*
+### 2.4 · `public.transactions` *(mig 02 + 07 + 22 + 24 + 38 + 39 + 43)*
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -146,6 +146,7 @@
 | `bank_connection_id` | uuid FK bank_connections(id) | mig 22; ON DELETE SET NULL |
 | `external_id` | text | mig 22; UNIQUE PARTIAL con account_id WHERE NOT NULL |
 | `order_id` | uuid FK purchase_orders(id) | mig 38; ON DELETE SET NULL |
+| `is_direct_charge` | bool NOT NULL | mig 43; DEFAULT false; cargo de raíl sin pedido (decisión humana explícita) |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
@@ -979,6 +980,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260602000040 | `grants_categories_authenticated.sql` | GRANT INSERT, UPDATE on categories TO authenticated (INV-6) |
 | 20260603000041 | `backfill_first_charge_date.sql` | T-026a: first_charge_date = order_date para financiados (data migration) |
 | 20260604000042 | `grant_delete_purchase_order_charges.sql` | T-031: GRANT DELETE en purchase_order_charges para authenticated (INV-6) |
+| 20260604000043 | `transactions_is_direct_charge.sql` | T-033: transactions.is_direct_charge boolean NOT NULL DEFAULT false |
 
 ---
 
