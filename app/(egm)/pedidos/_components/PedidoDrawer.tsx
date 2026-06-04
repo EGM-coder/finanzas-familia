@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { CategoryCombobox, type Category } from '@/app/(egm)/control/_components/CategoryCombobox'
 import {
-  confirmMatch, linkManual, unlinkCharge, updateOrderCategory, searchCandidates,
+  confirmMatch, linkManual, unlinkCharge, rejectMatch, updateOrderCategory, searchCandidates,
   type CandidateTxn,
 } from '../_actions/pedidos'
 import type { Pedido, PedidoCharge } from './types'
@@ -232,6 +232,20 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
     }
   }
 
+  async function handleReject() {
+    if (!order || !aiProposed) return
+    setIsSaving(true)
+    const result = await rejectMatch(aiProposed.id, order.id)
+    setIsSaving(false)
+    if (result.ok) {
+      toast.success('Propuesta rechazada')
+      onClose()
+      router.refresh()
+    } else {
+      toast.error(result.error)
+    }
+  }
+
   async function handleUnlink(chargeId: string, txnId: string) {
     if (!order) return
     setIsSaving(true)
@@ -279,7 +293,11 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
         >
           {/* P-015: wrapper .egm para que las clases del kit funcionen en el portal */}
           <div className="egm" style={{ display: 'contents' }}>
-            <div style={{ display: 'none' }}><Drawer.Handle /></div>
+            <Drawer.Handle style={{
+              width: 32, height: 4, borderRadius: 2,
+              background: 'var(--rule)', margin: '10px auto 0',
+              cursor: 'grab', flexShrink: 0,
+            }} />
 
             {/* Zona scrollable */}
             <div style={{
@@ -551,28 +569,48 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
                   </button>
                 )}
 
-                {/* Confirmar enlace ai_proposed */}
+                {/* Confirmar / Rechazar enlace ai_proposed (T-032) */}
                 {aiProposed && confirmed.length === 0 && (
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={handleConfirm}
-                    onMouseEnter={e => { if (!isSaving) e.currentTarget.style.background = 'var(--ink)'; e.currentTarget.style.color = 'var(--paper)' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink)' }}
-                    style={{
-                      width: '100%', height: 40,
-                      padding: '0 18px',
-                      border: '1px solid var(--ink)',
-                      background: 'transparent', color: 'var(--ink)',
-                      cursor: isSaving ? 'default' : 'pointer',
-                      fontFamily: 'var(--sans)', fontSize: 13,
-                      opacity: isSaving ? 0.6 : 1,
-                      transition: 'background 150ms ease, color 150ms ease, opacity 150ms ease',
-                      borderRadius: 0,
-                    }}
-                  >
-                    {isSaving ? 'Confirmando...' : 'Confirmar enlace'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={handleReject}
+                      style={{
+                        flex: '0 0 auto', height: 40, padding: '0 14px',
+                        border: '1px solid var(--rule)',
+                        background: 'transparent', color: 'var(--ink-3)',
+                        cursor: isSaving ? 'default' : 'pointer',
+                        fontFamily: 'var(--sans)', fontSize: 12,
+                        opacity: isSaving ? 0.6 : 1,
+                        transition: 'border-color 150ms ease, color 150ms ease',
+                        borderRadius: 0,
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--ink-3)'; e.currentTarget.style.color = 'var(--ink-1)' }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--rule)'; e.currentTarget.style.color = 'var(--ink-3)' }}
+                    >
+                      Rechazar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={handleConfirm}
+                      onMouseEnter={e => { if (!isSaving) { e.currentTarget.style.background = 'var(--ink)'; e.currentTarget.style.color = 'var(--paper)' } }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink)' }}
+                      style={{
+                        flex: 1, height: 40, padding: '0 18px',
+                        border: '1px solid var(--ink)',
+                        background: 'transparent', color: 'var(--ink)',
+                        cursor: isSaving ? 'default' : 'pointer',
+                        fontFamily: 'var(--sans)', fontSize: 13,
+                        opacity: isSaving ? 0.6 : 1,
+                        transition: 'background 150ms ease, color 150ms ease, opacity 150ms ease',
+                        borderRadius: 0,
+                      }}
+                    >
+                      {isSaving ? 'Confirmando...' : 'Confirmar enlace'}
+                    </button>
+                  </div>
                 )}
 
                 {/* Enlazar cargo (no financiado sin cargo, o financiado con cuotas pendientes) */}

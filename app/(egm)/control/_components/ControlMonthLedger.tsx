@@ -17,10 +17,12 @@ interface Props {
   removedIds?: Set<string>
 }
 
-// Cargo de raíl: tiene order_id, está marcado directo, o la contrapartida es PayPal/Amazon
+// Cargo de raíl: misma lógica que T-031 searchCandidates (counterparty OR description)
+// + raw_concept por si el banco solo muestra el nombre del comercio en counterparty
 function isRailTxn(row: EnrichedRow): boolean {
-  const cp = row.counterparty?.toLowerCase() ?? ''
-  return cp.includes('paypal') || cp.includes('amazon')
+  const texts = [row.counterparty, row.description, row.raw_concept]
+    .map(s => s?.toLowerCase() ?? '')
+  return texts.some(t => t.includes('paypal') || t.includes('amazon'))
 }
 
 function groupByDay(rows: EnrichedRow[]): Array<{ date: string; rows: EnrichedRow[] }> {

@@ -498,8 +498,10 @@ export function CategorizationDrawer({
 
             {/* T-033: cargo directo — solo para raíl (PayPal/Amazon) sin enlace */}
             {transaction && transaction.order_id === null && (() => {
-              const cp = transaction.counterparty?.toLowerCase() ?? ''
-              const isRail = cp.includes('paypal') || cp.includes('amazon') || transaction.is_direct_charge
+              const texts = [transaction.counterparty, transaction.description, transaction.raw_concept]
+                .map(s => s?.toLowerCase() ?? '')
+              const isRail = texts.some(t => t.includes('paypal') || t.includes('amazon'))
+                || transaction.is_direct_charge
               if (!isRail) return null
               return (
                 <div style={{ paddingTop: 16, borderTop: '1px solid var(--rule-2)' }}>

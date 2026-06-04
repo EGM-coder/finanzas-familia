@@ -45,6 +45,29 @@ export async function confirmMatch(
   return { ok: true }
 }
 
+// Rechazar propuesta de enlace IA (T-032)
+// Solo para match_method='ai_proposed'; no toca transactions.order_id (no se había fijado)
+export async function rejectMatch(
+  chargeId: string,
+  orderId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('purchase_order_charges')
+    .delete()
+    .eq('id', chargeId)
+  if (error) return { ok: false, error: 'Error al rechazar la propuesta' }
+
+  await supabase
+    .from('purchase_orders')
+    .update({ match_status: 'sin_linkar' })
+    .eq('id', orderId)
+
+  revalidatePath('/pedidos')
+  return { ok: true }
+}
+
 // Enlazar manualmente un cargo de Control a un pedido
 export async function linkManual(
   orderId: string,

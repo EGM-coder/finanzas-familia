@@ -204,3 +204,13 @@
   outline: 1px solid var(--ink-2);
   outline-offset: 2px;
 }
+
+/* ── Vaul drawers — T-032 mobile touch fixes ─────────────── */
+/* El handle debe capturar el gesto sin interferir con el scroll */
+[data-vaul-handle]                        { touch-action: none; cursor: grab; }
+/* El overlay no debe bloquear los eventos de puntero cuando está activo */
+[data-vaul-overlay]                       { pointer-events: auto; }
+/* El contenido del drawer permite scroll vertical pero no swipe horizontal */
+[data-vaul-drawer-direction="right"]      { touch-action: pan-y; }
+/* Sin transform en ancestros que rompan position:fixed del portal */
+.egm                                      { transform: none; }
