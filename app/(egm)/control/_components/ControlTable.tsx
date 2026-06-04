@@ -26,6 +26,7 @@ export interface Row {
   projects: { id: string; name: string } | null
   order_id: string | null
   purchase_orders: { merchant: string | null } | null
+  is_direct_charge: boolean
 }
 
 interface Props {

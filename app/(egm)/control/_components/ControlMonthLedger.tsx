@@ -17,6 +17,12 @@ interface Props {
   removedIds?: Set<string>
 }
 
+// Cargo de raíl: tiene order_id, está marcado directo, o la contrapartida es PayPal/Amazon
+function isRailTxn(row: EnrichedRow): boolean {
+  const cp = row.counterparty?.toLowerCase() ?? ''
+  return cp.includes('paypal') || cp.includes('amazon')
+}
+
 function groupByDay(rows: EnrichedRow[]): Array<{ date: string; rows: EnrichedRow[] }> {
   const map = new Map<string, EnrichedRow[]>()
   for (const row of rows) {
@@ -214,12 +220,16 @@ function LedgerRow({
         >
           {label}
         </div>
-        {/* PV-3: indicador de vinculación a pedido */}
-        <div className="roman" style={{ fontSize: 10, marginTop: 1, color: 'var(--ink-4)' }}>
-          {row.order_id
-            ? `● ${row.purchase_orders?.merchant ?? '—'}`
-            : '○ Cargo sin vincular'}
-        </div>
+        {/* PV-3: indicador de conciliación — tres estados, solo cargos de raíl */}
+        {(row.order_id !== null || row.is_direct_charge || isRailTxn(row)) && (
+          <div className="roman" style={{ fontSize: 10, marginTop: 1, color: 'var(--ink-4)' }}>
+            {row.order_id
+              ? `● ${row.purchase_orders?.merchant ?? '—'}`
+              : row.is_direct_charge
+                ? '— directo'
+                : '○ Cargo sin vincular'}
+          </div>
+        )}
       </div>
 
       {row.por_revisar && <ReviewBadge />}

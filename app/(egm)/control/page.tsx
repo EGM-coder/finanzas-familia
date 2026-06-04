@@ -188,7 +188,7 @@ export default async function ControlPage({ searchParams }: Props) {
     .select(`
       id, date, description, counterparty, raw_concept, amount, currency,
       category_id, project_id, nature, titular, is_reimbursable,
-      order_id,
+      order_id, is_direct_charge,
       accounts(institution, name),
       categories(id, name, color, parent_id),
       projects(id, name),

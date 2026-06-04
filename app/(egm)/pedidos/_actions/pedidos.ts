@@ -228,6 +228,7 @@ export async function searchCandidates(
     .from('transactions')
     .select('id, date, amount, counterparty, description')
     .is('order_id', null)
+    .eq('is_direct_charge', false)
     .lt('amount', 0)
     .gte('date', from.toISOString().slice(0, 10))
     .lte('date', to.toISOString().slice(0, 10))

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Drawer } from 'vaul'
 import { CategoryCombobox, type Category } from './CategoryCombobox'
 import { ProjectCombobox, type Project } from './ProjectCombobox'
@@ -12,6 +13,7 @@ import { RuleSubForm } from './RuleSubForm'
 import { updateTransaction, type UpdateTransactionPayload } from '../_actions/updateTransaction'
 import { createRule, type MatchField } from '../_actions/createRule'
 import { deleteRule } from '../_actions/deleteRule'
+import { toggleDirectCharge } from '../_actions/toggleDirectCharge'
 
 type TransactionRow = {
   id: string
@@ -26,6 +28,8 @@ type TransactionRow = {
   nature: string | null
   titular: string | null
   is_reimbursable: boolean | null
+  order_id: string | null
+  is_direct_charge: boolean
 }
 
 export type DirtySnapshot = {
@@ -69,12 +73,14 @@ export function CategorizationDrawer({
   onMarkRemoved, onRestoreRow,
   initialDirtySnapshot, onConsumeDirtySnapshot, onReopenWithDirty,
 }: Props) {
+  const router = useRouter()
   const isOpen = transaction !== null
   const [categoryId, setCategoryId] = useState<string | null>(transaction?.category_id ?? null)
   const [projectId, setProjectId] = useState<string | null>(transaction?.project_id ?? null)
   const [nature, setNature] = useState<NatureValue | null>((transaction?.nature as NatureValue | null) ?? null)
   const [titular, setTitular] = useState<TitularValue>((transaction?.titular as TitularValue) ?? 'compartido')
   const [isReimbursable, setIsReimbursable] = useState<boolean>(transaction?.is_reimbursable ?? false)
+  const [isDirectCharge, setIsDirectCharge] = useState<boolean>(transaction?.is_direct_charge ?? false)
   const [isSaving, setIsSaving] = useState(false)
   const [isRuleSubFormOpen, setIsRuleSubFormOpen] = useState(false)
   const categoryWrapperRef = useRef<HTMLDivElement>(null)
@@ -96,6 +102,7 @@ export function CategorizationDrawer({
       setTitular((transaction.titular as TitularValue) ?? 'compartido')
       setIsReimbursable(transaction.is_reimbursable ?? false)
     }
+    setIsDirectCharge(transaction.is_direct_charge ?? false)
     setIsRuleSubFormOpen(false)
   }, [transaction?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -221,6 +228,19 @@ export function CategorizationDrawer({
         </button>
       ),
     })
+  }
+
+  async function handleToggleDirect() {
+    if (!transaction || transaction.order_id !== null) return
+    const newVal = !isDirectCharge
+    setIsDirectCharge(newVal)  // optimistic
+    const result = await toggleDirectCharge(transaction.id, newVal)
+    if (!result.ok) {
+      setIsDirectCharge(!newVal)  // revert
+      toast.error(result.error)
+    } else {
+      router.refresh()
+    }
   }
 
   async function handleCreateRuleAndSave(matchField: MatchField, matchValue: string) {
@@ -475,6 +495,42 @@ export function CategorizationDrawer({
                 isSaving={isSaving}
               />
             )}
+
+            {/* T-033: cargo directo — solo para raíl (PayPal/Amazon) sin enlace */}
+            {transaction && transaction.order_id === null && (() => {
+              const cp = transaction.counterparty?.toLowerCase() ?? ''
+              const isRail = cp.includes('paypal') || cp.includes('amazon') || transaction.is_direct_charge
+              if (!isRail) return null
+              return (
+                <div style={{ paddingTop: 16, borderTop: '1px solid var(--rule-2)' }}>
+                  <button
+                    type="button"
+                    onClick={handleToggleDirect}
+                    style={{
+                      background: 'none',
+                      border: '1px solid var(--rule)',
+                      padding: '7px 14px',
+                      cursor: 'pointer',
+                      fontFamily: 'var(--sans)',
+                      fontSize: 11,
+                      letterSpacing: '0.06em',
+                      color: isDirectCharge ? 'var(--signal-neg)' : 'var(--ink-3)',
+                      borderRadius: 0,
+                      transition: 'color 150ms ease, border-color 150ms ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--ink-3)'; e.currentTarget.style.color = 'var(--ink-1)' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--rule)'; e.currentTarget.style.color = isDirectCharge ? 'var(--signal-neg)' : 'var(--ink-3)' }}
+                  >
+                    {isDirectCharge ? 'Quitar cargo directo' : 'Marcar como cargo directo'}
+                  </button>
+                  {isDirectCharge && (
+                    <div className="roman" style={{ fontSize: 10, marginTop: 6, color: 'var(--ink-4)' }}>
+                      Cargo de raíl sin pedido asociado — no requiere conciliación.
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
 
           {/* Footer sticky */}
