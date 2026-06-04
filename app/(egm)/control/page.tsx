@@ -188,7 +188,7 @@ export default async function ControlPage({ searchParams }: Props) {
     .select(`
       id, date, description, counterparty, raw_concept, amount, currency,
       category_id, project_id, nature, titular, is_reimbursable,
-      order_id, is_direct_charge,
+      order_id,
       accounts(institution, name),
       categories(id, name, color, parent_id),
       projects(id, name),
@@ -203,7 +203,15 @@ export default async function ControlPage({ searchParams }: Props) {
   if (natureFilter) txnQuery = txnQuery.eq('nature', natureFilter)
   if (projectFilter) txnQuery = txnQuery.eq('project_id', projectFilter)
 
-  const [txnsRes, categoriesRes, projectsRes, superCatRes] = await Promise.all([
+  // is_direct_charge en query separada: degrada a false si mig-43 no está aplicada aún (T-035)
+  const directChargeQuery = supabase
+    .from('transactions')
+    .select('id, is_direct_charge')
+    .eq('source', 'psd2')
+    .gte('date', start)
+    .lt('date', end)
+
+  const [txnsRes, categoriesRes, projectsRes, superCatRes, directChargeRes] = await Promise.all([
     txnQuery,
     supabase
       .from('categories')
@@ -222,6 +230,7 @@ export default async function ControlPage({ searchParams }: Props) {
       .eq('name', 'Supermercado')
       .eq('is_default', true)
       .single(),
+    directChargeQuery,
   ])
 
   if (txnsRes.error) throw new Error(txnsRes.error.message)
@@ -258,6 +267,14 @@ export default async function ControlPage({ searchParams }: Props) {
       .lt('date', end),
   ])
 
+  // Degrada a false si mig-43 no está aplicada (columna inexistente → error 42703)
+  const directChargeMap = new Map<string, boolean>()
+  if (!directChargeRes.error && directChargeRes.data) {
+    for (const r of directChargeRes.data) {
+      directChargeMap.set(r.id as string, Boolean(r.is_direct_charge))
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const enrichedRows: EnrichedRow[] = (txnsRes.data as any[]).map((row) => {
     const root = resolveRoot(row.category_id, catMap)
@@ -267,7 +284,12 @@ export default async function ControlPage({ searchParams }: Props) {
       !row.titular ||
       !row.counterparty ||
       row.counterparty === row.raw_concept
-    return { ...row, rootColor: root?.color ?? null, por_revisar } as EnrichedRow
+    return {
+      ...row,
+      rootColor: root?.color ?? null,
+      por_revisar,
+      is_direct_charge: directChargeMap.get(row.id) ?? false,
+    } as EnrichedRow
   })
 
   const countPorRevisar = enrichedRows.filter((r) => r.por_revisar).length
