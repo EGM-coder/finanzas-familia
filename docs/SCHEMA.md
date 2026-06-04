@@ -921,7 +921,7 @@ Todas las columnas de `holdings` más:
 | `monthly_closures` | ✓ RLS | ✓ mig 31 | ✓ mig 31 | — | Grupo C, sin DELETE |
 | `purchase_orders` | ✓ RLS | ✓ mig 35 | ✓ mig 35 | — | visibility tri-state |
 | `purchase_order_lines` | ✓ RLS | ✓ mig 36 | ✓ mig 36 | — | via can_see_order() |
-| `purchase_order_charges` | ✓ RLS | ✓ mig 37 | ✓ mig 37 | — | via can_see_transaction() |
+| `purchase_order_charges` | ✓ RLS | ✓ mig 37 | ✓ mig 37 | ✓ mig 42 | via can_see_transaction() |
 
 ---
 
@@ -978,6 +978,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260601000039 | `transactions_source_outlook.sql` | Amplía CHECK transactions.source con outlook_parse |
 | 20260602000040 | `grants_categories_authenticated.sql` | GRANT INSERT, UPDATE on categories TO authenticated (INV-6) |
 | 20260603000041 | `backfill_first_charge_date.sql` | T-026a: first_charge_date = order_date para financiados (data migration) |
+| 20260604000042 | `grant_delete_purchase_order_charges.sql` | T-031: GRANT DELETE en purchase_order_charges para authenticated (INV-6) |
 
 ---
 
