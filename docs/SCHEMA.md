@@ -684,7 +684,7 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 
 ---
 
-### 2.29 · `public.purchase_order_charges` *(mig 37)*
+### 2.29 · `public.purchase_order_charges` *(mig 37 + 42 + 44)*
 
 Enlace cuota bancaria ↔ pedido. Una transacción solo puede pertenecer a un pedido (UNIQUE en transaction_id).
 
@@ -698,8 +698,9 @@ Enlace cuota bancaria ↔ pedido. Una transacción solo puede pertenecer a un pe
 | `created_at` | timestamptz NOT NULL | DEFAULT now() |
 
 **Índices:** `purchase_order_charges_txn_unique` UNIQUE (transaction_id); `purchase_order_charges_order_idx` (order_id).  
-**RLS:** SELECT/INSERT/UPDATE — `can_see_transaction(transaction_id)`.  
-**GRANTs:** SELECT, INSERT, UPDATE a `authenticated`.
+**RLS:** SELECT/INSERT/UPDATE — `can_see_transaction(transaction_id)`; DELETE — mig-44 `pol_charges_delete` (misma condición).  
+**GRANTs:** SELECT, INSERT, UPDATE a `authenticated` (mig 37); DELETE a `authenticated` (mig 42).  
+**Nota INV-6:** mig-42 añadió solo el GRANT DELETE; sin la policy DELETE (mig-44), el RLS deny-by-default bloqueaba todos los DELETE silenciosamente.
 
 ---
 
@@ -922,7 +923,7 @@ Todas las columnas de `holdings` más:
 | `monthly_closures` | ✓ RLS | ✓ mig 31 | ✓ mig 31 | — | Grupo C, sin DELETE |
 | `purchase_orders` | ✓ RLS | ✓ mig 35 | ✓ mig 35 | — | visibility tri-state |
 | `purchase_order_lines` | ✓ RLS | ✓ mig 36 | ✓ mig 36 | — | via can_see_order() |
-| `purchase_order_charges` | ✓ RLS | ✓ mig 37 | ✓ mig 37 | ✓ mig 42 | via can_see_transaction() |
+| `purchase_order_charges` | ✓ RLS | ✓ mig 37 | ✓ mig 37 | ✓ mig 42+44 | via can_see_transaction() |
 
 ---
 
@@ -981,6 +982,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260603000041 | `backfill_first_charge_date.sql` | T-026a: first_charge_date = order_date para financiados (data migration) |
 | 20260604000042 | `grant_delete_purchase_order_charges.sql` | T-031: GRANT DELETE en purchase_order_charges para authenticated (INV-6) |
 | 20260604000043 | `transactions_is_direct_charge.sql` | T-033: transactions.is_direct_charge boolean NOT NULL DEFAULT false |
+| 20260604000044 | `policy_delete_purchase_order_charges.sql` | T-034: policy DELETE en purchase_order_charges (faltaba en mig-37; mig-42 solo añadió GRANT) |
 
 ---
 
