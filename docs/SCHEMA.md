@@ -147,12 +147,14 @@
 | `external_id` | text | mig 22; UNIQUE PARTIAL con account_id WHERE NOT NULL |
 | `order_id` | uuid FK purchase_orders(id) | mig 38; ON DELETE SET NULL |
 | `is_direct_charge` | bool NOT NULL | mig 43; DEFAULT false; cargo de raíl sin pedido (decisión humana explícita) |
+| `superseded_by` | uuid FK transactions(id) NULL | mig 45; ON DELETE SET NULL; NULL=activa, uuid=duplicado de esa fila (excluida de vistas/sumas); reversible |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
 **Índices:** `transactions_date_idx` (date DESC), `transactions_account_date_idx` (account_id, date DESC), `transactions_category_idx` (category_id), `transactions_titular_date_idx` (titular, date DESC), `transactions_external_id_unique` UNIQUE PARTIAL (account_id, external_id) WHERE external_id IS NOT NULL, `transactions_order_id_idx` (order_id) WHERE NOT NULL (mig 38).  
 **RLS:** Grupo D — `can_see_account(account_id)`.  
-**GRANTs (mig 22 Fase 3):** `authenticated` tiene SELECT, INSERT, UPDATE. Sin DELETE.
+**GRANTs (mig 22 Fase 3):** `authenticated` tiene SELECT, INSERT, UPDATE. Sin DELETE.  
+**Duplicados neutralizados (T-036):** `superseded_by IS NOT NULL` = duplicado h_-scheme reemplazado por er_-scheme canónico. Excluido en: `v_spent_by_category_month`, `v_spent_by_category_week`, `v_fixed_expenses_observed` (mig 46) y en todas las queries directas de inicio, planner, control, searchCandidates.
 
 ---
 
@@ -983,6 +985,8 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260604000042 | `grant_delete_purchase_order_charges.sql` | T-031: GRANT DELETE en purchase_order_charges para authenticated (INV-6) |
 | 20260604000043 | `transactions_is_direct_charge.sql` | T-033: transactions.is_direct_charge boolean NOT NULL DEFAULT false |
 | 20260604000044 | `policy_delete_purchase_order_charges.sql` | T-034: policy DELETE en purchase_order_charges (faltaba en mig-37; mig-42 solo añadió GRANT) |
+| 20260604000045 | `transactions_superseded_by.sql` | T-036: columna superseded_by uuid FK self; neutralización reversible de duplicados |
+| 20260604000046 | `views_exclude_superseded.sql` | T-036: v_spent_by_category_month, v_spent_by_category_week, v_fixed_expenses_observed añaden superseded_by IS NULL |
 
 ---
 

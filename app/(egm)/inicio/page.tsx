@@ -123,6 +123,7 @@ export default async function InicioPage() {
       .from('transactions')
       .select('amount, nature, project_id, category_id')
       .eq('source', 'psd2')
+      .is('superseded_by', null)
       .gte('date', start)
       .lt('date', end),
     supabase

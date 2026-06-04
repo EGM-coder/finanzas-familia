@@ -77,6 +77,7 @@ export default async function ControlPage({ searchParams }: Props) {
         .from('transactions')
         .select('amount, nature, project_id')
         .eq('source', 'psd2')
+        .is('superseded_by', null)
         .gte('date', start)
         .lt('date', end),
       supabase
@@ -108,6 +109,7 @@ export default async function ControlPage({ searchParams }: Props) {
         .from('transactions')
         .select('amount, nature, project_id, date')
         .eq('source', 'psd2')
+        .is('superseded_by', null)
         .gte('date', prior6Start)
         .lt('date', start),
       supabase
@@ -195,6 +197,7 @@ export default async function ControlPage({ searchParams }: Props) {
       purchase_orders(merchant)
     `)
     .eq('source', 'psd2')
+    .is('superseded_by', null)
     .gte('date', start)
     .lt('date', end)
     .order('date', { ascending: false })

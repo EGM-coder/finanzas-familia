@@ -56,6 +56,7 @@ export default async function PlannerPage({ searchParams }: Props) {
       .from('transactions')
       .select('amount, nature, project_id')
       .eq('source', 'psd2')
+      .is('superseded_by', null)
       .gte('date', start)
       .lt('date', end),
     supabase
@@ -87,6 +88,7 @@ export default async function PlannerPage({ searchParams }: Props) {
       .from('transactions')
       .select('amount, nature, project_id, date')
       .eq('source', 'psd2')
+      .is('superseded_by', null)
       .gte('date', prior6Start)
       .lt('date', start),
     supabase

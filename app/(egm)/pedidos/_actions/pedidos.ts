@@ -251,6 +251,7 @@ export async function searchCandidates(
     .from('transactions')
     .select('id, date, amount, counterparty, description')
     .is('order_id', null)
+    .is('superseded_by', null)
     .eq('is_direct_charge', false)
     .lt('amount', 0)
     .gte('date', from.toISOString().slice(0, 10))
