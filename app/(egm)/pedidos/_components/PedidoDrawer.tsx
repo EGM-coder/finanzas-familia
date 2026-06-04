@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { CategoryCombobox, type Category } from '@/app/(egm)/control/_components/CategoryCombobox'
 import {
-  confirmMatch, linkManual, updateOrderCategory, searchCandidates,
+  confirmMatch, linkManual, unlinkCharge, updateOrderCategory, searchCandidates,
   type CandidateTxn,
 } from '../_actions/pedidos'
 import type { Pedido, PedidoCharge } from './types'
@@ -30,8 +30,8 @@ function sourceLabel(source: string): string {
   } as Record<string, string>)[source] ?? source
 }
 
-function confirmedCharge(order: Pedido): PedidoCharge | undefined {
-  return order.purchase_order_charges.find(c => c.match_method === 'confirmed' || c.match_method === 'manual')
+function confirmedCharges(order: Pedido): PedidoCharge[] {
+  return order.purchase_order_charges.filter(c => c.match_method === 'confirmed' || c.match_method === 'manual')
 }
 
 function aiProposedCharge(order: Pedido): PedidoCharge | undefined {
@@ -76,7 +76,7 @@ function CloseBtn({ onClick }: { onClick: () => void }) {
   )
 }
 
-function ChargeLine({ charge }: { charge: PedidoCharge }) {
+function ChargeLine({ charge, onUnlink }: { charge: PedidoCharge; onUnlink?: () => void }) {
   const txn = charge.transactions
   if (!txn) return null
   return (
@@ -88,12 +88,32 @@ function ChargeLine({ charge }: { charge: PedidoCharge }) {
         <span style={{ fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--ink-1)' }}>
           {txn.counterparty ?? '—'}
         </span>
-        <span className="num" style={{ fontSize: 13, color: 'var(--signal-neg)', flexShrink: 0 }}>
-          {fmtAmount(Math.abs(txn.amount))}&thinsp;€
-        </span>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexShrink: 0 }}>
+          <span className="num" style={{ fontSize: 13, color: 'var(--signal-neg)' }}>
+            {fmtAmount(Math.abs(txn.amount))}&thinsp;€
+          </span>
+          {onUnlink && (
+            <button
+              type="button"
+              onClick={onUnlink}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--signal-neg)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--ink-4)')}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                fontFamily: 'var(--sans)', fontSize: 10, color: 'var(--ink-4)',
+                letterSpacing: '0.06em', transition: 'color 120ms ease',
+              }}
+            >
+              Desenlazar
+            </button>
+          )}
+        </div>
       </div>
       <div className="roman" style={{ fontSize: 11, marginTop: 4, color: 'var(--ink-3)' }}>
         {fmtDate(txn.date)}
+        {charge.installment_number !== null && charge.installment_number !== undefined && (
+          <span style={{ marginLeft: 8 }}>· cuota {charge.installment_number}</span>
+        )}
         {charge.match_method === 'ai_proposed' && (
           <span style={{ marginLeft: 8, color: 'var(--signal-warn)' }}>· propuesto por IA</span>
         )}
@@ -117,11 +137,11 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
   const router = useRouter()
   const isOpen = order !== null
 
-  // D-005: la fuente de verdad de categoría
-  const confirmed = order ? confirmedCharge(order) : undefined
+  const confirmed = order ? confirmedCharges(order) : []
   const aiProposed = order ? aiProposedCharge(order) : undefined
-  const linkedTxnId  = confirmed?.transaction_id ?? null
-  const initialCatId = confirmed?.transactions?.category_id
+  const firstConfirmed = confirmed[0] ?? null
+  const linkedTxnId = firstConfirmed?.transaction_id ?? null
+  const initialCatId = firstConfirmed?.transactions?.category_id
     ?? order?.purchase_order_lines[0]?.category_id
     ?? null
   const aiSuggestedCatId = order?.purchase_order_lines[0]?.ai_suggested_category_id ?? null
@@ -149,12 +169,21 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
   useEffect(() => {
     if (!linkPanelOpen || !order) return
     startTransition(async () => {
-      const results = await searchCandidates(order.order_date, '')
+      const results = await searchCandidates(order.order_date, '', order.source)
       setCandidates(results)
     })
   }, [linkPanelOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const isDirtyCategory = categoryId !== persistedCatId
+
+  // Mostrar panel de enlace si: sin cargo confirmado, o financiado con cuotas pendientes
+  const showLinkButton = (() => {
+    if (!order) return false
+    if (aiProposed && confirmed.length === 0) return false  // ya tiene propuesta IA → solo confirmar
+    if (confirmed.length === 0) return true
+    if (order.is_financed && order.installment_count && confirmed.length < order.installment_count) return true
+    return false
+  })()
 
   // ── Handlers ─────────────────────────────────────────────
 
@@ -192,11 +221,24 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
     if (!order) return
     setIsSaving(true)
     const lineCat = order.purchase_order_lines[0]?.category_id ?? null
-    const result = await linkManual(order.id, txnId, order.is_financed, lineCat)
+    const result = await linkManual(order.id, txnId, order.is_financed, lineCat, order.installment_count)
     setIsSaving(false)
     if (result.ok) {
       toast.success('Cargo enlazado')
-      onClose()
+      setLinkPanelOpen(false)
+      router.refresh()
+    } else {
+      toast.error(result.error)
+    }
+  }
+
+  async function handleUnlink(chargeId: string, txnId: string) {
+    if (!order) return
+    setIsSaving(true)
+    const result = await unlinkCharge(chargeId, order.id, txnId)
+    setIsSaving(false)
+    if (result.ok) {
+      toast.success('Cargo desenlazado')
       router.refresh()
     } else {
       toast.error(result.error)
@@ -207,7 +249,7 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
     if (!order) return
     setSearchQ(q)
     startTransition(async () => {
-      const results = await searchCandidates(order.order_date, q)
+      const results = await searchCandidates(order.order_date, q, order.source)
       setCandidates(results)
     })
   }
@@ -304,9 +346,7 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
                     </div>
                     {/* Pago (solo si financiado) */}
                     {order.is_financed && order.installment_count && (() => {
-                      const n = order.purchase_order_charges.filter(
-                        c => c.match_method === 'confirmed' || c.match_method === 'manual',
-                      ).length
+                      const n = confirmed.length
                       const m = order.installment_count
                       return (
                         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
@@ -319,8 +359,8 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
                     })()}
                     {/* Clasificación */}
                     {(() => {
-                      const ok = confirmed
-                        ? confirmed.transactions?.category_id !== null
+                      const ok = confirmed.length > 0
+                        ? confirmed[0].transactions?.category_id !== null
                         : order.purchase_order_lines.some(l => l.category_id !== null)
                       return (
                         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
@@ -364,14 +404,29 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
                 </section>
               )}
 
-              {/* Cargo enlazado o propuesto */}
-              {order && (confirmed || aiProposed) && (
+              {/* Cargos confirmados/manuales (todos) */}
+              {order && confirmed.length > 0 && (
                 <section>
                   <FieldLabel>
-                    {confirmed ? 'Cargo enlazado' : 'Cargo propuesto por IA'}
+                    {confirmed.length === 1 ? 'Cargo enlazado' : `Cargos enlazados (${confirmed.length})`}
                   </FieldLabel>
-                  {confirmed && <ChargeLine charge={confirmed} />}
-                  {!confirmed && aiProposed && <ChargeLine charge={aiProposed} />}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {confirmed.map(charge => (
+                      <ChargeLine
+                        key={charge.id}
+                        charge={charge}
+                        onUnlink={() => handleUnlink(charge.id, charge.transaction_id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Cargo propuesto por IA (solo si no hay confirmados) */}
+              {order && confirmed.length === 0 && aiProposed && (
+                <section>
+                  <FieldLabel>Cargo propuesto por IA</FieldLabel>
+                  <ChargeLine charge={aiProposed} />
                 </section>
               )}
 
@@ -421,7 +476,7 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
                     )}
                     {!isPending && candidates.length === 0 && (
                       <div className="roman" style={{ fontSize: 12, color: 'var(--ink-4)', padding: '8px 0' }}>
-                        Sin candidatos en ±15 días del pedido.
+                        Sin candidatos en ±90 días del pedido.
                       </div>
                     )}
                     {candidates.map(txn => (
@@ -497,7 +552,7 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
                 )}
 
                 {/* Confirmar enlace ai_proposed */}
-                {aiProposed && !confirmed && (
+                {aiProposed && confirmed.length === 0 && (
                   <button
                     type="button"
                     disabled={isSaving}
@@ -520,8 +575,8 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
                   </button>
                 )}
 
-                {/* Enlazar manualmente (solo si no hay cargo de ningún tipo) */}
-                {!confirmed && !aiProposed && (
+                {/* Enlazar cargo (no financiado sin cargo, o financiado con cuotas pendientes) */}
+                {showLinkButton && (
                   <button
                     type="button"
                     onClick={() => setLinkPanelOpen(o => !o)}
@@ -536,7 +591,11 @@ export function PedidoDrawer({ order, categories, onClose }: Props) {
                       borderRadius: 0,
                     }}
                   >
-                    {linkPanelOpen ? 'Cancelar búsqueda' : 'Enlazar cargo de Control'}
+                    {linkPanelOpen
+                      ? 'Cancelar búsqueda'
+                      : confirmed.length > 0
+                        ? `Enlazar siguiente cuota (${confirmed.length + 1}/${order.installment_count})`
+                        : 'Enlazar cargo de Control'}
                   </button>
                 )}
               </div>
