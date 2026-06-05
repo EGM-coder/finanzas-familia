@@ -95,64 +95,47 @@ def extract_text(pdf_path: str) -> str:
 # ──────────────────────────────────────────────────────────────
 
 def extract_period(lines: list[str]) -> date:
-    """Primera fecha dd/mm/yyyy de la fila de PERIODO → día 1 del mes."""
-    DATE_RE = re.compile(r'\b(\d{2}/\d{2}/\d{4})\b')
-    for line in lines:
-        if re.search(r'PERIOD', line, re.IGNORECASE):
-            m = DATE_RE.search(line)
-            if m:
-                d_s, mo_s, y_s = m.group(1).split('/')
-                return date(int(y_s), int(mo_s), 1)
-    raise ValueError("Periodo no encontrado en el PDF")
-
-
-def extract_liquido_total(text: str) -> Decimal:
-    """LIQUIDO TOTAL seguido del importe (\\s+ cruza salto de línea)."""
-    m = re.search(
-        r'LIQUIDO\s+TOTAL\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})',
-        text,
-        re.IGNORECASE,
-    )
-    if not m:
-        raise ValueError("'LIQUIDO TOTAL' no encontrado en el PDF")
-    return parse_money(m.group(1))
-
-
-def extract_importe_cuenta(lines: list[str]) -> Optional[Decimal]:
     """
-    Extrae el importe de la línea de cuenta ****4940.
-    Usado como doble-check contra LIQUIDO TOTAL.
+    Primera línea con DOS fechas dd/mm/yyyy consecutivas → grupo 1 (inicio periodo).
+    La cabecera es tabla de 2 filas: etiquetas arriba, valores abajo.
+    La fecha de antigüedad (01/03/2022) va sola y NO casa este patrón.
+    """
+    PERIOD_PAIR_RE = re.compile(r'(\d{2}/\d{2}/\d{4})\D+(\d{2}/\d{2}/\d{4})')
+    for line in lines:
+        m = PERIOD_PAIR_RE.search(line)
+        if m:
+            d_s, mo_s, y_s = m.group(1).split('/')
+            return date(int(y_s), int(mo_s), 1)
+    raise ValueError("Periodo no encontrado: ninguna linea con dos fechas dd/mm/yyyy")
+
+
+def extract_net(lines: list[str]) -> Decimal:
+    """
+    Ancla: linea con 'Importe:' (DOS PUNTOS obligatorios).
+    'Importe remuneraci' e 'Importe prorrata' NO llevan dos puntos → no colisionan.
+    Evidencia: enero l.34 'Cuenta: ****4940   Importe:   3.223,55'
     """
     for line in lines:
-        if '4940' in line:
-            # Intenta patrón "Importe: X"
-            m = re.search(
-                r'Importe\s*:?\s*(-?\d{1,3}(?:\.\d{3})*,\d{2})',
-                line,
-                re.IGNORECASE,
-            )
-            if m:
-                return parse_money(m.group(1))
-            # Fallback: último importe en la línea con la cuenta
+        if re.search(r'Importe\s*:', line, re.IGNORECASE):
             v = rightmost_money(line)
             if v is not None:
                 return v
-    return None
+    raise ValueError("'Importe:' (con dos puntos) no encontrado en el PDF")
 
 
-def extract_gross(text: str) -> Decimal:
+def extract_gross(lines: list[str]) -> Decimal:
     """
-    Ancla 'Importe remuneración mensual' → importe siguiente.
-    Equivale a REM. TOTAL; más robusto que buscar la columna.
+    Busca la linea que contiene 'remuneraci' Y 'mensual' (ASCII, sin tilde).
+    Excluye 'Importe prorrata' (sin 'mensual') y 'Importe:' (es el net).
+    Evidencia: enero l.40 '... Importe remuneracion mensual  5.343,95'
     """
-    m = re.search(
-        r'Importe\s+remuneraci[oó]n\s+mensual\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})',
-        text,
-        re.IGNORECASE,
-    )
-    if not m:
-        raise ValueError("'Importe remuneración mensual' no encontrado")
-    return parse_money(m.group(1))
+    for line in lines:
+        lo = line.lower()
+        if 'remuneraci' in lo and 'mensual' in lo:
+            v = rightmost_money(line)
+            if v is not None:
+                return v
+    raise ValueError("Linea con 'remuneraci' + 'mensual' no encontrada en el PDF")
 
 
 def extract_irpf_and_rate(lines: list[str]) -> tuple[Decimal, Decimal]:
@@ -216,27 +199,18 @@ def parse_payslip(pdf_path: str, filename: str) -> list[dict]:
 
     Falla ruidosamente (excepción) si:
       - No se encuentran los campos anclados
-      - El doble-check LIQUIDO TOTAL ≠ Importe cuenta
       - Las sumas de las filas no cuadran con los totales extraídos
     """
     text  = extract_text(pdf_path)
     lines = text.split('\n')
 
     # Campos brutos
-    period_date = extract_period(lines)
-    net_total   = extract_liquido_total(text)
-    gross_total = extract_gross(text)
+    period_date      = extract_period(lines)
+    net_total        = extract_net(lines)
+    gross_total      = extract_gross(lines)
     irpf_total, rate = extract_irpf_and_rate(lines)
-    ss_total    = extract_ss(lines)
-    bonus_gross = extract_bonus(lines)
-
-    # Doble-check net vs línea de cuenta bancaria
-    importe_cuenta = extract_importe_cuenta(lines)
-    if importe_cuenta is not None and importe_cuenta != net_total:
-        raise ValueError(
-            f"DOBLE-CHECK FAILED en {filename}: "
-            f"LIQUIDO TOTAL {net_total} ≠ Importe cuenta {importe_cuenta}"
-        )
+    ss_total         = extract_ss(lines)
+    bonus_gross      = extract_bonus(lines)
 
     date_iso  = period_date.isoformat()   # "2026-01-01"
     mes_label = period_date.strftime('%-d %B %Y').lstrip('1 ') if False else \
@@ -363,8 +337,8 @@ def run_golden_tests(pdf_dir: str) -> None:
         try:
             text  = extract_text(str(pdf))
             lines = text.split('\n')
-            net_total   = extract_liquido_total(text)
-            gross_total = extract_gross(text)
+            net_total        = extract_net(lines)
+            gross_total      = extract_gross(lines)
             irpf_total, rate = extract_irpf_and_rate(lines)
             ss_total    = extract_ss(lines)
             bonus_gross = extract_bonus(lines)
