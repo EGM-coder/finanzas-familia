@@ -706,6 +706,24 @@ Enlace cuota bancaria ↔ pedido. Una transacción solo puede pertenecer a un pe
 
 ---
 
+### 2.30 · Storage · bucket `nominas` *(mig 47)*
+
+Bucket privado de Supabase Storage para PDFs de nómina Nordex.
+
+| Campo | Valor |
+|---|---|
+| `id` | `nominas` |
+| `public` | `false` (privado) |
+| `file_size_limit` | 50 MB |
+| `allowed_mime_types` | `application/pdf` |
+
+**Acceso:**
+- Worker `parse_nominas.py` usa `service_role` → bypassa RLS totalmente.
+- Subida manual desde dashboard Supabase → service_role (Eric como project owner).
+- App (futuro): policies `nominas_owner_select` / `nominas_owner_insert` — `owner = auth.uid()`.
+
+---
+
 ## 3 · Vistas
 
 ### 3.1 · `public.account_balances` *(mig 09)*
@@ -866,12 +884,14 @@ Todas las columnas de `holdings` más:
 
 ---
 
-### 3.11 · `public.v_median_income_3m` *(mig 29)*
+### 3.11 · `public.v_median_income_3m` *(mig 29 + mig 48)*
 
 **Columnas:** `user_id` uuid, `median_monthly_income` numeric, `months_with_data` int.
 
 **Rango:** 3 meses completos anteriores al mes actual. Agrupa `SUM(net_amount)` por mes/usuario, toma percentile_cont(0.5).  
-**Security_invoker:** true — cada usuario solo ve sus propios datos.
+**Filtro tipo (mig 48):** `type = 'nomina_mensual'` — excluye `bonus` y `paga_extra` para que no inflen la mediana usada como base de anticipación en Budget y Planner.  
+**Security_invoker:** true — cada usuario solo ve sus propios datos.  
+**Nota:** deja obsoleta la idea futura de calcular la mediana desde `transactions` (no distingue nómina vs bonus).
 
 ---
 
@@ -987,6 +1007,8 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260604000044 | `policy_delete_purchase_order_charges.sql` | T-034: policy DELETE en purchase_order_charges (faltaba en mig-37; mig-42 solo añadió GRANT) |
 | 20260604000045 | `transactions_superseded_by.sql` | T-036: columna superseded_by uuid FK self; neutralización reversible de duplicados |
 | 20260604000046 | `views_exclude_superseded.sql` | T-036: v_spent_by_category_month, v_spent_by_category_week, v_fixed_expenses_observed añaden superseded_by IS NULL |
+| 20260605000047 | `storage_bucket_nominas.sql` | Bucket privado 'nominas' + policies owner-only para app (worker usa service_role) |
+| 20260605000048 | `v_median_income_3m_nomina_mensual.sql` | v_median_income_3m filtra type='nomina_mensual' (excluye bonus/paga_extra) |
 
 ---
 
