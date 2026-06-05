@@ -96,17 +96,21 @@ def extract_text(pdf_path: str) -> str:
 
 def extract_period(lines: list[str]) -> date:
     """
-    Primera línea con DOS fechas dd/mm/yyyy consecutivas → grupo 1 (inicio periodo).
-    La cabecera es tabla de 2 filas: etiquetas arriba, valores abajo.
-    La fecha de antigüedad (01/03/2022) va sola y NO casa este patrón.
+    Busca sobre el texto completo (no linea a linea) para que los saltos
+    de linea del runner no impidan casar el par de fechas.
+    r'\\D+?' (non-greedy) asegura el PRIMER par = inicio+fin de periodo.
+    Fallback: primera fecha suelta del documento (= inicio de periodo en esta plantilla).
+    La fecha de antiguedad (01/03/2022) suele ir despues, el par la descarta.
     """
-    PERIOD_PAIR_RE = re.compile(r'(\d{2}/\d{2}/\d{4})\D+(\d{2}/\d{2}/\d{4})')
-    for line in lines:
-        m = PERIOD_PAIR_RE.search(line)
-        if m:
-            d_s, mo_s, y_s = m.group(1).split('/')
-            return date(int(y_s), int(mo_s), 1)
-    raise ValueError("Periodo no encontrado: ninguna linea con dos fechas dd/mm/yyyy")
+    full = '\n'.join(lines)
+    m = re.search(r'(\d{2}/\d{2}/\d{4})\D+?(\d{2}/\d{2}/\d{4})', full)
+    if not m:
+        m = re.search(r'(\d{2}/\d{2}/\d{4})', full)
+    if not m:
+        raise ValueError("Periodo no encontrado en el PDF")
+    d_s, mo_s, y_s = m.group(1).split('/')
+    logger.info("DEBUG periodo elegido: %s", m.group(1))
+    return date(int(y_s), int(mo_s), 1)
 
 
 def extract_net(lines: list[str]) -> Decimal:
@@ -203,6 +207,9 @@ def parse_payslip(pdf_path: str, filename: str) -> list[dict]:
     """
     text  = extract_text(pdf_path)
     lines = text.split('\n')
+
+    # SONDA temporal — longitud y fechas encontradas (sin volcar la nómina)
+    logger.info("DEBUG len(text)=%d dates=%s", len(text), re.findall(r'\d{2}/\d{2}/\d{4}', text))
 
     # Campos brutos
     period_date      = extract_period(lines)
