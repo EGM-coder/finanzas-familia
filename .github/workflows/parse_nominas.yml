@@ -1,0 +1,36 @@
+name: parse_nominas
+
+on:
+  workflow_dispatch:  # Solo manual — se dispara cuando Eric sube nuevas nóminas al bucket
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies (poppler-utils para pdftotext)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install python-dotenv supabase
+
+      - name: Run parse_nominas
+        working-directory: egmfin-jobs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EGMFIN_OWNER_USER_ID: ${{ secrets.EGMFIN_OWNER_USER_ID }}
+        run: |
+          python3 parse_nominas.py
