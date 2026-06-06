@@ -260,7 +260,7 @@
 | `art_7p_exempt_amount` | numeric(12,2) | |
 | `employer` | text | |
 | `concept` | text | |
-| `source` | text NOT NULL | DEFAULT 'manual' |
+| `source` | text NOT NULL | DEFAULT 'manual'; CHECK: `manual`, `csv`, `psd2`, `gmail_parse`, `nordex_payslip` (mig 49) |
 | `source_id` | text | |
 | `notes` | text | |
 | `created_at` | timestamptz NOT NULL | |
@@ -1009,6 +1009,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260604000046 | `views_exclude_superseded.sql` | T-036: v_spent_by_category_month, v_spent_by_category_week, v_fixed_expenses_observed añaden superseded_by IS NULL |
 | 20260605000047 | `storage_bucket_nominas.sql` | Bucket privado 'nominas' + policies owner-only para app (worker usa service_role) |
 | 20260605000048 | `v_median_income_3m_nomina_mensual.sql` | v_median_income_3m filtra type='nomina_mensual' (excluye bonus/paga_extra) |
+| 20260606000049 | `incomes_source_nordex_payslip.sql` | incomes.source CHECK ampliado: añade 'nordex_payslip' para worker parse_nominas |
 
 ---
 

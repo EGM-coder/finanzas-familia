@@ -109,7 +109,6 @@ def extract_period(lines: list[str]) -> date:
     if not m:
         raise ValueError("Periodo no encontrado en el PDF")
     d_s, mo_s, y_s = m.group(1).split('/')
-    logger.info("DEBUG periodo elegido: %s", m.group(1))
     return date(int(y_s), int(mo_s), 1)
 
 
@@ -207,9 +206,6 @@ def parse_payslip(pdf_path: str, filename: str) -> list[dict]:
     """
     text  = extract_text(pdf_path)
     lines = text.split('\n')
-
-    # SONDA temporal — longitud y fechas encontradas (sin volcar la nómina)
-    logger.info("DEBUG len(text)=%d dates=%s", len(text), re.findall(r'\d{2}/\d{2}/\d{4}', text))
 
     # Campos brutos
     period_date      = extract_period(lines)
