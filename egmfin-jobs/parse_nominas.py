@@ -59,6 +59,19 @@ MONEY_RE = re.compile(r'-?\d{1,3}(?:\.\d{3})*,\d{2}')
 # Regex tipo/%: 30.00  (punto, 2 decimales, sin coma)
 RATE_RE  = re.compile(r'(?<!\d)(\d{1,3}\.\d{2})(?!\d)')
 
+# Mapa de códigos de devengo extra → type de incomes.
+# Cada código puede aparecer varias veces (reversión + recálculo); se suman con signo.
+EXTRA_CODES: dict[str, str] = {
+    '2053': 'bonus',
+    '4000': 'paga_extra',
+}
+
+# Plantillas de concept por tipo de extra.
+EXTRA_CONCEPTS: dict[str, str] = {
+    'bonus':      'Bonus {mes} (Libre Disposición)',
+    'paga_extra': 'Paga Extra {mes}',
+}
+
 
 # ──────────────────────────────────────────────────────────────
 # Helpers de formato numérico
@@ -176,19 +189,25 @@ def extract_ss(lines: list[str]) -> Decimal:
     return total
 
 
-def extract_bonus(lines: list[str]) -> Decimal:
+def extract_extras(lines: list[str]) -> dict[str, Decimal]:
     """
-    Código 2053 = Libre Disposición (bonus variable).
-    Retorna 0 si la línea no existe en el PDF.
-    El importe es el de DEVENGOS (único en esta línea).
-    TODO: paga_extra — código de devengo aún desconocido; punto de extensión.
+    Para cada código en EXTRA_CODES, suma TODAS sus ocurrencias respetando el signo.
+    Código 4000 (paga_extra) puede tener líneas negativas (reversión) y positivas
+    (recálculo); el sumatorio es el gross neto del extra.
+    Retorna solo los extras con |gross| >= 0.01.
     """
-    for line in lines:
-        if re.match(r'\s*2053\b', line):
-            v = rightmost_money(line)
-            if v is not None:
-                return v
-    return Decimal('0')
+    result: dict[str, Decimal] = {}
+    for code, income_type in EXTRA_CODES.items():
+        code_re = re.compile(rf'^\s*{re.escape(code)}\b')
+        total = Decimal('0')
+        for line in lines:
+            if code_re.match(line):
+                v = rightmost_money(line)
+                if v is not None:
+                    total += v
+        if abs(total) >= Decimal('0.01'):
+            result[income_type] = total
+    return result
 
 
 # ──────────────────────────────────────────────────────────────
@@ -213,53 +232,38 @@ def parse_payslip(pdf_path: str, filename: str) -> list[dict]:
     gross_total      = extract_gross(lines)
     irpf_total, rate = extract_irpf_and_rate(lines)
     ss_total         = extract_ss(lines)
-    bonus_gross      = extract_bonus(lines)
+    extras           = extract_extras(lines)   # {type: gross}; respeta signo
 
-    date_iso  = period_date.isoformat()   # "2026-01-01"
-    mes_label = period_date.strftime('%-d %B %Y').lstrip('1 ') if False else \
-                period_date.strftime('%B %Y').capitalize()     # "Enero 2026"
+    date_iso  = period_date.isoformat()
+    mes_label = period_date.strftime('%B %Y').capitalize()   # "Enero 2026"
 
     rows: list[dict] = []
 
-    if bonus_gross == Decimal('0'):
-        # Nómina sin bonus: 1 sola fila
+    # ── Filas de extras (bonus, paga_extra, …) ────────────────
+    for extra_type, extra_gross in extras.items():
+        extra_irpf = (extra_gross * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        extra_net  = extra_gross - extra_irpf   # ss = 0 (base SS topada)
+        concept_tmpl = EXTRA_CONCEPTS.get(extra_type, '{mes} ' + extra_type)
         rows.append({
-            'type':      'nomina_mensual',
-            'gross':     gross_total,
-            'irpf':      irpf_total,
-            'ss':        ss_total,
-            'net':       net_total,
-            'concept':   f"Nómina {mes_label}",
-            'source_id': f"{date_iso}:nomina_mensual",
-        })
-    else:
-        # Nómina con bonus: 2 filas (bonus + mensual residual)
-        bonus_irpf    = (bonus_gross * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        bonus_net     = bonus_gross - bonus_irpf   # SS del bonus = 0 (base SS topada)
-
-        mensual_gross = gross_total - bonus_gross
-        mensual_irpf  = irpf_total  - bonus_irpf
-        mensual_ss    = ss_total                   # toda la SS va a la mensual
-        mensual_net   = net_total   - bonus_net    # residual garantiza cuadratura exacta
-
-        rows.append({
-            'type':      'bonus',
-            'gross':     bonus_gross,
-            'irpf':      bonus_irpf,
+            'type':      extra_type,
+            'gross':     extra_gross,
+            'irpf':      extra_irpf,
             'ss':        Decimal('0'),
-            'net':       bonus_net,
-            'concept':   f"Bonus {mes_label} (Libre Disposición)",
-            'source_id': f"{date_iso}:bonus",
+            'net':       extra_net,
+            'concept':   concept_tmpl.format(mes=mes_label),
+            'source_id': f"{date_iso}:{extra_type}",
         })
-        rows.append({
-            'type':      'nomina_mensual',
-            'gross':     mensual_gross,
-            'irpf':      mensual_irpf,
-            'ss':        mensual_ss,
-            'net':       mensual_net,
-            'concept':   f"Nómina {mes_label}",
-            'source_id': f"{date_iso}:nomina_mensual",
-        })
+
+    # ── Fila mensual residual (garantiza cuadratura exacta) ───
+    rows.append({
+        'type':      'nomina_mensual',
+        'gross':     gross_total - sum(r['gross'] for r in rows),
+        'irpf':      irpf_total  - sum(r['irpf']  for r in rows),
+        'ss':        ss_total,
+        'net':       net_total   - sum(r['net']   for r in rows),
+        'concept':   f"Nomina {mes_label}",
+        'source_id': f"{date_iso}:nomina_mensual",
+    })
 
     # ── Asserts cuadratura (siempre, fallo ruidoso) ───────────
     sum_net   = sum(r['net']   for r in rows)
@@ -278,13 +282,10 @@ def parse_payslip(pdf_path: str, filename: str) -> list[dict]:
         if r['type'] == 'nomina_mensual':
             if not (Decimal('1500') <= r['net'] <= Decimal('7000')):
                 logger.warning(
-                    "WARN posible extra/paga_extra no contemplada en %s: "
-                    "nomina_mensual.net=%s fuera de [1500, 7000] — revisar PDF",
-                    mes_label, r['net'],
+                    "WARN mensual.net=%s fuera de [1500, 7000] en %s "
+                    "— posible codigo extra no contemplado en EXTRA_CODES",
+                    r['net'], mes_label,
                 )
-                # TODO paga_extra: código de devengo aún desconocido.
-                # Cuando aparezca, añadir extracción análoga a bonus (2053)
-                # con su propio type='paga_extra' en el CHECK de incomes.
 
     # ── Campos comunes ─────────────────────────────────────────
     for r in rows:
@@ -305,13 +306,14 @@ def parse_payslip(pdf_path: str, filename: str) -> list[dict]:
 # ──────────────────────────────────────────────────────────────
 
 GOLDEN_TESTS: dict[str, dict] = {
-    # Clave: cualquier substring del nombre de archivo (mes-año)
+    # Clave: cualquier substring del nombre de archivo (ej. '2026-01', '112025').
+    # extras: {type: gross esperado} — valida extract_extras por tipo.
     '2026-01': {
         'net_total':   Decimal('3223.55'),
         'gross_total': Decimal('5343.95'),
         'irpf_total':  Decimal('1526.69'),
         'ss_total':    Decimal('333.83'),
-        'bonus_gross': Decimal('0'),
+        'extras':      {},
         'n_rows':      1,
     },
     '2026-05': {
@@ -319,9 +321,15 @@ GOLDEN_TESTS: dict[str, dict] = {
         'gross_total': Decimal('25935.30'),
         'irpf_total':  Decimal('7702.33'),
         'ss_total':    Decimal('352.37'),
-        'bonus_gross': Decimal('20577.35'),
+        'extras':      {'bonus': Decimal('20577.35')},
         'n_rows':      2,
         'sum_net':     Decimal('17613.95'),
+    },
+    # Noviembre 2025: paga_extra = suma de las dos líneas 4000
+    # (-4.857,46 + 5.100,52 = 243,06). Fixture de regresión para extract_extras.
+    # Totales brutos del PDF necesarios para sum_net; completar cuando se disponga del PDF.
+    '112025': {
+        'extras':  {'paga_extra': Decimal('243.06')},
     },
 }
 
@@ -343,9 +351,9 @@ def run_golden_tests(pdf_dir: str) -> None:
             net_total        = extract_net(lines)
             gross_total      = extract_gross(lines)
             irpf_total, rate = extract_irpf_and_rate(lines)
-            ss_total    = extract_ss(lines)
-            bonus_gross = extract_bonus(lines)
-            rows        = parse_payslip(str(pdf), filename)
+            ss_total         = extract_ss(lines)
+            extras           = extract_extras(lines)
+            rows             = parse_payslip(str(pdf), filename)
         except Exception as e:
             logger.error("  ERROR: %s", e)
             failed += 1
@@ -364,13 +372,20 @@ def run_golden_tests(pdf_dir: str) -> None:
             if got != expected:
                 errs.append(f"  {label}: got={got}  expected={expected}")
 
-        chk('net_total',   net_total,   golden['net_total'])
-        chk('gross_total', gross_total, golden['gross_total'])
-        chk('irpf_total',  irpf_total,  golden['irpf_total'])
-        chk('ss_total',    ss_total,    golden['ss_total'])
-        chk('bonus_gross', bonus_gross, golden['bonus_gross'])
+        if 'net_total'   in golden: chk('net_total',   net_total,   golden['net_total'])
+        if 'gross_total' in golden: chk('gross_total', gross_total, golden['gross_total'])
+        if 'irpf_total'  in golden: chk('irpf_total',  irpf_total,  golden['irpf_total'])
+        if 'ss_total'    in golden: chk('ss_total',    ss_total,    golden['ss_total'])
 
-        if len(rows) != golden['n_rows']:
+        if 'extras' in golden:
+            for etype, expected_gross in golden['extras'].items():
+                chk(f'extras[{etype}]', extras.get(etype, Decimal('0')), expected_gross)
+            # Extras NO esperados no deben aparecer
+            for etype in extras:
+                if etype not in golden['extras']:
+                    errs.append(f"  extras[{etype}] inesperado: got={extras[etype]}")
+
+        if 'n_rows' in golden and len(rows) != golden['n_rows']:
             errs.append(f"  n_rows: got={len(rows)}  expected={golden['n_rows']}")
 
         if 'sum_net' in golden:
