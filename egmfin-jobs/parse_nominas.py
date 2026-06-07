@@ -64,6 +64,8 @@ RATE_RE  = re.compile(r'(?<!\d)(\d{1,3}\.\d{2})(?!\d)')
 EXTRA_CODES: dict[str, str] = {
     '2053': 'bonus',
     '4000': 'paga_extra',
+    '4001': 'paga_extra',   # Paga Extra Navidad
+    '3068': 'paga_extra',   # Compl. Paga Extra maternidad
 }
 
 # Plantillas de concept por tipo de extra.
@@ -127,16 +129,21 @@ def extract_period(lines: list[str]) -> date:
 
 def extract_net(lines: list[str]) -> Decimal:
     """
-    Ancla: linea con 'Importe:' (DOS PUNTOS obligatorios).
+    Suma TODOS los importes de líneas con 'Importe:' (DOS PUNTOS obligatorios).
+    Necesario para meses multi-transferencia (diciembre: 2.531,01 + 5.567,17 = 8.098,18).
     'Importe remuneraci' e 'Importe prorrata' NO llevan dos puntos → no colisionan.
-    Evidencia: enero l.34 'Cuenta: ****4940   Importe:   3.223,55'
     """
+    total = Decimal('0')
+    found = False
     for line in lines:
         if re.search(r'Importe\s*:', line, re.IGNORECASE):
             v = rightmost_money(line)
             if v is not None:
-                return v
-    raise ValueError("'Importe:' (con dos puntos) no encontrado en el PDF")
+                total += v
+                found = True
+    if not found:
+        raise ValueError("'Importe:' (con dos puntos) no encontrado en el PDF")
+    return total
 
 
 def extract_gross(lines: list[str]) -> Decimal:
@@ -192,22 +199,57 @@ def extract_ss(lines: list[str]) -> Decimal:
 def extract_extras(lines: list[str]) -> dict[str, Decimal]:
     """
     Para cada código en EXTRA_CODES, suma TODAS sus ocurrencias respetando el signo.
-    Código 4000 (paga_extra) puede tener líneas negativas (reversión) y positivas
-    (recálculo); el sumatorio es el gross neto del extra.
+    Múltiples códigos que mapean al mismo type (4000+4001+3068 → 'paga_extra') se acumulan.
     Retorna solo los extras con |gross| >= 0.01.
     """
-    result: dict[str, Decimal] = {}
+    totals: dict[str, Decimal] = {}
     for code, income_type in EXTRA_CODES.items():
         code_re = re.compile(rf'^\s*{re.escape(code)}\b')
-        total = Decimal('0')
+        code_total = Decimal('0')
         for line in lines:
             if code_re.match(line):
                 v = rightmost_money(line)
                 if v is not None:
-                    total += v
-        if abs(total) >= Decimal('0.01'):
-            result[income_type] = total
-    return result
+                    code_total += v
+        if abs(code_total) >= Decimal('0.01'):
+            totals[income_type] = totals.get(income_type, Decimal('0')) + code_total
+    return {k: v for k, v in totals.items() if abs(v) >= Decimal('0.01')}
+
+
+def extract_devengos_deducc(lines: list[str]) -> tuple[Decimal, Decimal]:
+    """
+    Extrae T.DEVENGOS y T.DEDUCC para cross-check del neto.
+    Busca la primera línea con 'devengos'; si tiene 2+ importes → mismo renglón;
+    si tiene 0 → los valores están en la línea siguiente (cabecera posicional de 2 filas).
+    Toma los dos primeros importes: [0]=devengos, [1]=deducc.
+    """
+    for i, line in enumerate(lines):
+        if 'devengos' not in line.lower():
+            continue
+        moneys = MONEY_RE.findall(line)
+        if len(moneys) >= 2:
+            return parse_money(moneys[0]), parse_money(moneys[1])
+        if i + 1 < len(lines):
+            next_moneys = MONEY_RE.findall(lines[i + 1])
+            if len(next_moneys) >= 2:
+                return parse_money(next_moneys[0]), parse_money(next_moneys[1])
+    raise ValueError("Fila T.DEVENGOS / T.DEDUCC no encontrada para cross-check")
+
+
+def extract_dietas(lines: list[str]) -> Decimal:
+    """
+    Suma el devengo (rightmost money) de líneas cuyo concepto contiene
+    'dieta', 'klm' o 'kilom' (ASCII, case-insensitive).
+    V1: dietas_net = dietas_gross (suplido: sin IRPF/SS aplicables).
+    """
+    DIETA_RE = re.compile(r'dieta|klm\b|kilom', re.IGNORECASE)
+    total = Decimal('0')
+    for line in lines:
+        if DIETA_RE.search(line):
+            v = rightmost_money(line)
+            if v is not None:
+                total += v
+    return total
 
 
 # ──────────────────────────────────────────────────────────────
@@ -233,6 +275,16 @@ def parse_payslip(pdf_path: str, filename: str) -> list[dict]:
     irpf_total, rate = extract_irpf_and_rate(lines)
     ss_total         = extract_ss(lines)
     extras           = extract_extras(lines)   # {type: gross}; respeta signo
+    dietas_gross     = extract_dietas(lines)
+
+    # ── Cross-check obligatorio: net = T.DEVENGOS − T.DEDUCC ─
+    devengos, deducc = extract_devengos_deducc(lines)
+    diff = abs((devengos - deducc) - net_total)
+    if diff > Decimal('0.01'):
+        raise ValueError(
+            f"CROSS-CHECK FAIL: T.DEVENGOS({devengos}) - T.DEDUCC({deducc}) = "
+            f"{devengos - deducc} ≠ net_total({net_total})  |diff|={diff}  en {filename}"
+        )
 
     date_iso  = period_date.isoformat()
     mes_label = period_date.strftime('%B %Y').capitalize()   # "Enero 2026"
@@ -252,6 +304,18 @@ def parse_payslip(pdf_path: str, filename: str) -> list[dict]:
             'net':       extra_net,
             'concept':   concept_tmpl.format(mes=mes_label),
             'source_id': f"{date_iso}:{extra_type}",
+        })
+
+    # ── Fila dietas (suplidos: irpf=ss=0; net=gross) ─────────
+    if abs(dietas_gross) >= Decimal('0.01'):
+        rows.append({
+            'type':      'dietas',
+            'gross':     dietas_gross,
+            'irpf':      Decimal('0'),
+            'ss':        Decimal('0'),
+            'net':       dietas_gross,
+            'concept':   f"Dietas {mes_label}",
+            'source_id': f"{date_iso}:dietas",
         })
 
     # ── Fila mensual residual (garantiza cuadratura exacta) ───
@@ -331,6 +395,13 @@ GOLDEN_TESTS: dict[str, dict] = {
     '112025': {
         'extras':  {'paga_extra': Decimal('243.06')},
     },
+    # Diciembre 2025: multi-transferencia (2.531,01 + 5.567,17 = 8.098,18)
+    # paga_extra: 4001 (3.615,73 Navidad) + 3068 (1.888,19 Compl. Maternidad) = 5.503,92
+    # dietas_gross: completar con valor real del PDF (ver bloque dietas/Klm)
+    '122025': {
+        'net_total': Decimal('8098.18'),
+        'extras':    {'paga_extra': Decimal('5503.92')},
+    },
 }
 
 
@@ -353,6 +424,7 @@ def run_golden_tests(pdf_dir: str) -> None:
             irpf_total, rate = extract_irpf_and_rate(lines)
             ss_total         = extract_ss(lines)
             extras           = extract_extras(lines)
+            dietas_gross     = extract_dietas(lines)
             rows             = parse_payslip(str(pdf), filename)
         except Exception as e:
             logger.error("  ERROR: %s", e)
@@ -384,6 +456,9 @@ def run_golden_tests(pdf_dir: str) -> None:
             for etype in extras:
                 if etype not in golden['extras']:
                     errs.append(f"  extras[{etype}] inesperado: got={extras[etype]}")
+
+        if 'dietas_gross' in golden:
+            chk('dietas_gross', dietas_gross, golden['dietas_gross'])
 
         if 'n_rows' in golden and len(rows) != golden['n_rows']:
             errs.append(f"  n_rows: got={len(rows)}  expected={golden['n_rows']}")
