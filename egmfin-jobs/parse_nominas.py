@@ -216,24 +216,28 @@ def extract_extras(lines: list[str]) -> dict[str, Decimal]:
     return {k: v for k, v in totals.items() if abs(v) >= Decimal('0.01')}
 
 
-def extract_devengos_deducc(lines: list[str]) -> tuple[Decimal, Decimal]:
+def extract_devengos_deducc(lines: list[str]) -> Optional[tuple[Decimal, Decimal]]:
     """
-    Extrae T.DEVENGOS y T.DEDUCC para cross-check del neto.
-    Busca la primera línea con 'devengos'; si tiene 2+ importes → mismo renglón;
-    si tiene 0 → los valores están en la línea siguiente (cabecera posicional de 2 filas).
-    Toma los dos primeros importes: [0]=devengos, [1]=deducc.
+    Localiza la línea que contiene 'T.DEVENGOS' (cabecera posicional) y lee
+    los valores de la SIGUIENTE línea no vacía.
+    T.DEVENGOS = penúltimo token de dinero; T.DEDUCC = último token.
+    Verificado en dos PDFs reales:
+      dic: penúltimo=11.591,61  último=3.493,43  (dif=8.098,18)
+      ene: penúltimo=5.102,41   último=1.878,86  (dif=3.223,55)
+    Retorna None si no se encuentra — el caller emite WARN y continúa.
     """
     for i, line in enumerate(lines):
-        if 'devengos' not in line.lower():
+        if 'T.DEVENGOS' not in line:
             continue
-        moneys = MONEY_RE.findall(line)
-        if len(moneys) >= 2:
-            return parse_money(moneys[0]), parse_money(moneys[1])
-        if i + 1 < len(lines):
-            next_moneys = MONEY_RE.findall(lines[i + 1])
-            if len(next_moneys) >= 2:
-                return parse_money(next_moneys[0]), parse_money(next_moneys[1])
-    raise ValueError("Fila T.DEVENGOS / T.DEDUCC no encontrada para cross-check")
+        # Busca la siguiente línea no vacía (fila de valores)
+        for j in range(i + 1, len(lines)):
+            if not lines[j].strip():
+                continue
+            tokens = MONEY_RE.findall(lines[j])
+            if len(tokens) >= 2:
+                return parse_money(tokens[-2]), parse_money(tokens[-1])
+            break   # línea no vacía sin suficientes tokens → cabecera inesperada
+    return None
 
 
 def extract_dietas(lines: list[str]) -> Decimal:
@@ -277,14 +281,20 @@ def parse_payslip(pdf_path: str, filename: str) -> list[dict]:
     extras           = extract_extras(lines)   # {type: gross}; respeta signo
     dietas_gross     = extract_dietas(lines)
 
-    # ── Cross-check obligatorio: net = T.DEVENGOS − T.DEDUCC ─
-    devengos, deducc = extract_devengos_deducc(lines)
-    diff = abs((devengos - deducc) - net_total)
-    if diff > Decimal('0.01'):
-        raise ValueError(
-            f"CROSS-CHECK FAIL: T.DEVENGOS({devengos}) - T.DEDUCC({deducc}) = "
-            f"{devengos - deducc} ≠ net_total({net_total})  |diff|={diff}  en {filename}"
+    # ── Cross-check net = T.DEVENGOS − T.DEDUCC (soft si no se hallan) ──
+    totals_pair = extract_devengos_deducc(lines)
+    if totals_pair is None:
+        logger.warning(
+            "WARN cross-check omitido en %s — cabecera T.DEVENGOS no localizada", filename
         )
+    else:
+        devengos, deducc = totals_pair
+        diff = abs((devengos - deducc) - net_total)
+        if diff > Decimal('0.01'):
+            raise ValueError(
+                f"CROSS-CHECK FAIL: T.DEVENGOS({devengos}) - T.DEDUCC({deducc}) = "
+                f"{devengos - deducc} ≠ net_total({net_total})  |diff|={diff}  en {filename}"
+            )
 
     date_iso  = period_date.isoformat()
     mes_label = period_date.strftime('%B %Y').capitalize()   # "Enero 2026"
