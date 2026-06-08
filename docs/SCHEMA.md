@@ -724,6 +724,28 @@ Bucket privado de Supabase Storage para PDFs de nómina Nordex.
 
 ---
 
+### 2.31 · `public.income_charges` *(mig 50)*
+
+Tabla de enlace M:N entre `incomes` y `transactions` para el módulo **Casado Nóminas**.  
+A diferencia de `purchase_order_charges` (UNIQUE en `transaction_id`), aquí el UNIQUE es sobre **(income_id, transaction_id)**: un mismo depósito puede vincularse a varios incomes del mismo mes (ej. mayo: 1 depósito ↔ `nomina_mensual` + `bonus`).
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | `gen_random_uuid()` |
+| `income_id` | uuid NOT NULL FK | → `incomes(id)` ON DELETE RESTRICT |
+| `transaction_id` | uuid NOT NULL FK | → `transactions(id)` ON DELETE RESTRICT |
+| `match_method` | text NOT NULL | CHECK: `auto`, `manual`, `confirmed` |
+| `created_at` | timestamptz | DEFAULT now() |
+| `updated_at` | timestamptz | DEFAULT now(); trigger `set_updated_at()` |
+
+**Índices:** UNIQUE `(income_id, transaction_id)`; `income_charges_income_idx` (income_id); `income_charges_transaction_idx` (transaction_id).
+
+**RLS:** Las 4 operaciones (SELECT/INSERT/UPDATE/DELETE) con predicado doble:  
+`can_see_transaction(transaction_id) AND EXISTS(incomes WHERE id=income_id AND user_id=auth.uid())`  
+**GRANT:** `SELECT, INSERT, UPDATE, DELETE` a `authenticated` — ambos son obligatorios (lección INV-6 de mig 37/42/44).
+
+---
+
 ## 3 · Vistas
 
 ### 3.1 · `public.account_balances` *(mig 09)*
@@ -914,6 +936,34 @@ Todas las columnas de `holdings` más:
 
 ---
 
+### 3.14 · `public.v_income_reconciliation` *(mig 50)*
+
+Vista de conciliación de nóminas Nordex a nivel mes. Cruza `incomes` (source=`nordex_payslip`) con `transactions` (depósitos Nordex) vía `income_charges`.
+
+**Columnas:**
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `user_id` | uuid | Usuario propietario |
+| `mes` | text | Periodo en formato `YYYY-MM` |
+| `incomes_net` | numeric | `SUM(net_amount)` de todas las filas del mes (mensual + bonus + paga_extra + dietas) |
+| `candidate_dep` | numeric | `SUM(amount)` de depósitos Nordex candidatos en `transactions` ese mes |
+| `linked_dep` | numeric | `SUM(DISTINCT amount)` de depósitos enlazados vía `income_charges`; DISTINCT evita doble-conteo cuando 1 depósito ↔ 2 incomes |
+| `n_incomes` | int | Número de filas `incomes` del mes |
+| `n_linked` | int | Número de transacciones distintas enlazadas |
+| `psd2_cutoff` | date | `MIN(date)` de depósitos Nordex en `transactions`; NULL si aún no hay datos PSD2 |
+| `status` | text | `sin_contraparte` / `cuadrado` / `parcial` / `pendiente` (ver lógica abajo) |
+
+**Lógica `status`:**
+- `sin_contraparte` — mes anterior a `psd2_cutoff` (pre-PSD2: esperado, no es un error ni "pendiente")
+- `cuadrado` — `|linked_dep − incomes_net| ≤ 0.01`
+- `parcial` — hay enlace pero no cuadra
+- `pendiente` — mes ≥ cutoff y sin ningún depósito enlazado
+
+**Security_invoker:** true — cada CTE hereda RLS del usuario invocante; no mezcla datos entre usuarios.
+
+---
+
 ## 4 · GRANTs resumen por tabla
 
 | Tabla | authenticated SELECT | INSERT | UPDATE | DELETE | Notas |
@@ -946,6 +996,7 @@ Todas las columnas de `holdings` más:
 | `purchase_orders` | ✓ RLS | ✓ mig 35 | ✓ mig 35 | — | visibility tri-state |
 | `purchase_order_lines` | ✓ RLS | ✓ mig 36 | ✓ mig 36 | — | via can_see_order() |
 | `purchase_order_charges` | ✓ RLS | ✓ mig 37 | ✓ mig 37 | ✓ mig 42+44 | via can_see_transaction() |
+| `income_charges` | ✓ mig 50 | ✓ mig 50 | ✓ mig 50 | ✓ mig 50 | can_see_transaction() + incomes.user_id |
 
 ---
 
@@ -1010,6 +1061,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260605000047 | `storage_bucket_nominas.sql` | Bucket privado 'nominas' + policies owner-only para app (worker usa service_role) |
 | 20260605000048 | `v_median_income_3m_nomina_mensual.sql` | v_median_income_3m filtra type='nomina_mensual' (excluye bonus/paga_extra) |
 | 20260606000049 | `incomes_source_nordex_payslip.sql` | incomes.source CHECK ampliado: añade 'nordex_payslip' para worker parse_nominas |
+| 20260607000050 | `income_charges.sql` | income_charges M:N (UNIQUE income_id+transaction_id) + v_income_reconciliation; RLS+GRANT las 4 ops |
 
 ---
 
