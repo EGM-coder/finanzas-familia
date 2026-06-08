@@ -12,7 +12,7 @@ type Module = {
 // Pedidos y Presupuesto se acceden desde dentro de Control, no desde la nav.
 const MODULES: Module[] = [
   { n: 'I',   label: 'Inicio',    href: '/inicio' },
-  { n: 'II',  label: 'Proyecto',  href: null },
+  { n: 'II',  label: 'Ingresos',  href: '/ingresos' },
   { n: 'III', label: 'Control',   href: '/control' },
   { n: 'IV',  label: 'Horizonte', href: null },
   { n: 'V',   label: 'Análisis',  href: null },
