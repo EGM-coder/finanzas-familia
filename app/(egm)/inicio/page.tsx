@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { computeConsumo } from '../_lib/computeConsumo'
@@ -304,6 +305,14 @@ export default async function InicioPage() {
                     mediana 3m · {fmt(medianIncome)} €
                   </div>
                 )}
+                <Link
+                  href="/ingresos"
+                  className="roman"
+                  style={{ fontSize: 10.5, color: 'var(--ink-3)', textDecoration: 'none',
+                           marginTop: 4, display: 'inline-block' }}
+                >
+                  conciliación nóminas →
+                </Link>
               </div>
               <div>
                 <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>Fijos</div>
