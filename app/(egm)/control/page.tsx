@@ -237,6 +237,7 @@ export default async function ControlPage({ searchParams }: Props) {
   ])
 
   if (txnsRes.error) throw new Error(txnsRes.error.message)
+  if (categoriesRes.error) throw new Error(`categories: ${categoriesRes.error.message}`)
 
   const categories = categoriesRes.data ?? []
   const initialProjects = projectsRes.data ?? []
