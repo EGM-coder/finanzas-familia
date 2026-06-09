@@ -240,6 +240,9 @@ export default async function ControlPage({ searchParams }: Props) {
   if (categoriesRes.error) throw new Error(`categories: ${categoriesRes.error.message}`)
 
   const categories = categoriesRes.data ?? []
+  if (categories.length === 0) {
+    throw new Error('taxonomía base vacía: revisar sesión/RLS — auth.uid() probablemente NULL server-side')
+  }
   const initialProjects = projectsRes.data ?? []
   const superCatId = superCatRes.data?.id ?? null
   const catMap = new Map(categories.map((c) => [c.id, c]))
