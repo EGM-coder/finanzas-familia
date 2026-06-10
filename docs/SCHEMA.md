@@ -1,6 +1,6 @@
-# EGMFin · SCHEMA.md — Fuente de verdad (1-jun-2026)
+# EGMFin · SCHEMA.md — Fuente de verdad (10-jun-2026)
 
-> **Generado desde:** lectura directa de las 39 migraciones en `supabase/migrations/`  
+> **Generado desde:** lectura directa de las 57 migraciones en `supabase/migrations/`  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible en este entorno.  
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8).  
 > **P-009 (regla permanente):** antes de cualquier query nuevo, verificar columnas reales aquí o con `\d+ tabla`.
@@ -1062,7 +1062,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260605000048 | `v_median_income_3m_nomina_mensual.sql` | v_median_income_3m filtra type='nomina_mensual' (excluye bonus/paga_extra) |
 | 20260606000049 | `incomes_source_nordex_payslip.sql` | incomes.source CHECK ampliado: añade 'nordex_payslip' para worker parse_nominas |
 | 20260607000050 | `income_charges.sql` | income_charges M:N (UNIQUE income_id+transaction_id) + v_income_reconciliation; RLS+GRANT las 4 ops |
-| 20260610000051 | `fix_transferencias_nature_rules.sql` | Parche datos: 6 txns Leo/Biel → nature=transferencia; regla Ana fijo→transf; regla Biel inversion→transf + match_value robusto; regla Leo nueva |
+| 20260610000051 | `fix_transferencias_nature_rules.sql` | mig-51 PARCHE DATOS (solo DML, sin DDL) — 6 txns Leo/Biel (Feb+Abr) → nature='transferencia'; regla Ana (fijo_recurrente→transferencia), regla Biel (inversion→transferencia + match_value robusto), regla Leo nueva (transferencia, categoría 'Aportación cuenta de ahorro'). Idempotente. |
 
 ---
 
@@ -1077,3 +1077,4 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 - **P-006 (activo):** NDX1.DE en holding_prices sin holding asociado — necesario para stock_options_valued. Filas "huérfanas" esperadas.
 - **P-008 / D-001:** holding_prices acepta ticker=NULL AND isin=NULL. CHECK constraint pendiente (baja prioridad).
 - **`supabase db dump --linked`** requiere Docker. Para volcado fiel: iniciar Docker y ejecutar `npx supabase db dump --schema public --linked > docs/schema_dump.sql` antes del siguiente release.
+- **mig-51 (10-jun-2026):** parche de datos exclusivamente (UPDATE/INSERT en `transactions` y `classification_rules`). No altera ninguna definición de tabla, vista, RLS ni GRANT — §2/§3/§4 permanecen válidos. Idempotente (guards `IS DISTINCT FROM`, `WHERE NOT EXISTS`).
