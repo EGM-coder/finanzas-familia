@@ -1062,6 +1062,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260605000048 | `v_median_income_3m_nomina_mensual.sql` | v_median_income_3m filtra type='nomina_mensual' (excluye bonus/paga_extra) |
 | 20260606000049 | `incomes_source_nordex_payslip.sql` | incomes.source CHECK ampliado: añade 'nordex_payslip' para worker parse_nominas |
 | 20260607000050 | `income_charges.sql` | income_charges M:N (UNIQUE income_id+transaction_id) + v_income_reconciliation; RLS+GRANT las 4 ops |
+| 20260610000051 | `fix_transferencias_nature_rules.sql` | Parche datos: 6 txns Leo/Biel → nature=transferencia; regla Ana fijo→transf; regla Biel inversion→transf + match_value robusto; regla Leo nueva |
 
 ---
 
