@@ -243,6 +243,8 @@ export default async function ControlPage({ searchParams }: Props) {
   if (categories.length === 0) {
     throw new Error('taxonomía base vacía: revisar sesión/RLS — auth.uid() probablemente NULL server-side')
   }
+  // T-038-diag: quitar tras diagnosticar
+  console.log('[T-038-diag] uid:', user.id, '| categories:', categories.length, '| roots:', categories.filter(c => c.parent_id === null).length, '| txns:', (txnsRes.data?.length ?? 0))
   const initialProjects = projectsRes.data ?? []
   const superCatId = superCatRes.data?.id ?? null
   const catMap = new Map(categories.map((c) => [c.id, c]))
@@ -366,6 +368,11 @@ export default async function ControlPage({ searchParams }: Props) {
       </div>
 
       <MonthSwitcher mes={mes} />
+
+      {/* T-038-diag: quitar tras diagnosticar */}
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', padding: '6px 0', borderBottom: '1px solid var(--rule)', marginBottom: 16 }}>
+        diag · uid: {user.id.slice(0, 8)}… · cats: {categories.length} (roots: {categories.filter(c => c.parent_id === null).length}) · txns: {txnsRes.data?.length ?? 0}
+      </div>
 
       <ControlMonthShell
         rows={enrichedRows}
