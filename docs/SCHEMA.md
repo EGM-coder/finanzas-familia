@@ -985,6 +985,31 @@ Agrega el patrimonio por `(titular × segmento de liquidez)`. Alimenta el donut 
 
 ---
 
+### 3.16 · `public.v_cuentas_detalle` *(mig 54)*
+
+Como `v_cuentas_composicion` pero a nivel de **cuenta individual** (`account_id`). Alimenta el drill-down del módulo /cuentas (U4).
+
+**Columnas:**
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `account_id` | uuid | Identificador de la cuenta |
+| `name` | text | Nombre de la cuenta |
+| `institution` | text | Institución financiera |
+| `visibility` | text | `privada_eric` / `privada_ana` / `compartida` |
+| `titular` | text | `eric` / `ana` / `comun` / `leo` / `biel` |
+| `segmento` | text | `Efectivo` / `Renta variable + ETF` / `Fondos indexados` / `Roboadvisor` / `Cripto` / `Otros` |
+| `orden` | int | Orden: 1 Efectivo, 2 RV+ETF, 3 FI, 4 Roboadvisor, 5 Cripto, 9 Otros |
+| `valor` | numeric | Suma en EUR para esa (cuenta, segmento) |
+
+**Fuentes:** `accounts` + `account_balances_full` (Efectivo) · `holdings_valued` (cotizados) · `manual_holdings` (Roboadvisor).  
+**Filtro:** `is_active = true` en todas las tablas base.  
+**Security_invoker:** true — hereda RLS del usuario invocante.  
+**GRANT:** SELECT a `authenticated`.  
+**Verificado (12-jun-2026):** `SUM(valor) GROUP BY (titular, segmento)` = `v_cuentas_composicion` para todos los titulares, diff = 0.
+
+---
+
 ## 4 · GRANTs resumen por tabla
 
 | Tabla | authenticated SELECT | INSERT | UPDATE | DELETE | Notas |
@@ -1086,6 +1111,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260610000051 | `fix_transferencias_nature_rules.sql` | mig-51 PARCHE DATOS (solo DML, sin DDL) — 6 txns Leo/Biel (Feb+Abr) → nature='transferencia'; regla Ana (fijo_recurrente→transferencia), regla Biel (inversion→transferencia + match_value robusto), regla Leo nueva (transferencia, categoría 'Aportación cuenta de ahorro'). Idempotente. |
 | 20260612000052 | `titular_accounts.sql` | mig-52: ADD COLUMN `titular` text NOT NULL CHECK(eric\|ana\|comun\|leo\|biel) en `accounts`. Backfill por nombre (Leo/Biel) y visibility (privada_eric→eric, privada_ana→ana, compartida→comun). Eje de propiedad/destino; distinto de `visibility` (muro de privacidad). Base de la espina por titular y futura sucesión. |
 | 20260612000053 | `v_cuentas_composicion.sql` | mig-53: CREATE VIEW `v_cuentas_composicion` WITH (security_invoker=true) — agrega patrimonio por (titular × segmento: Efectivo/RV+ETF/FI/Roboadvisor/Cripto). Fuentes: account_balances_full + holdings_valued + manual_holdings. GRANT SELECT a authenticated. Alimenta donut y espina por titular de /cuentas. |
+| 20260612000054 | `v_cuentas_detalle.sql` | mig-54: CREATE VIEW `v_cuentas_detalle` WITH (security_invoker=true) — igual que v_cuentas_composicion pero a nivel de cuenta individual (account_id). Añade name, institution, visibility. Alimenta drill-down U4 de /cuentas. Verificado: SUM = v_cuentas_composicion para todos los titulares. |
 
 ---
 
