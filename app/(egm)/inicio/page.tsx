@@ -237,7 +237,12 @@ export default async function InicioPage() {
 
           {/* Composición */}
           <div className="rule" style={{ margin: '28px 0 14px' }} />
-          <div className="label" style={{ marginBottom: 12 }}>Composición</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+            <div className="label">Composición</div>
+            <Link href="/cuentas" className="roman" style={{ fontSize: 10.5, color: 'var(--ink-3)', textDecoration: 'none' }}>
+              desglose por titular →
+            </Link>
+          </div>
 
           {composicion.map((r) => (
             <div

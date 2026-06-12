@@ -22,6 +22,14 @@
   --signal-warn:#8a6a1a;
   --positive:   var(--signal-pos);
 
+  /* D-019 — Kowalski→Emil: profundidad sutil + radio + rampa de liquidez */
+  --shadow-sm: 0 1px 2px rgba(17,17,17,.05);
+  --shadow:    0 1px 2px rgba(17,17,17,.05), 0 6px 22px rgba(17,17,17,.05);
+  --radius:    12px;
+  --radius-sm: 8px;
+  --liq-1: #1f1f1d; --liq-2: #4a473e; --liq-3: #6e6b61;
+  --liq-4: #98968b; --liq-5: #c6c4ba;
+
   --serif: var(--font-newsreader), 'Times New Roman', serif;
   --sans:  var(--font-geist), -apple-system, system-ui, sans-serif;
   --mono:  var(--font-geist-mono), ui-monospace, monospace;
@@ -44,6 +52,12 @@
   --signal-neg: #d98a8a;
   --signal-warn:#c9a55c;
   --positive:   var(--signal-pos);
+
+  /* D-019 dark */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow:    0 1px 2px rgba(0,0,0,.4), 0 6px 22px rgba(0,0,0,.35);
+  --liq-1: #e8e5dd; --liq-2: #b8b4a8; --liq-3: #8e8a82;
+  --liq-4: #66635c; --liq-5: #44423d;
 }
 
 /* ── Shell EGMFin ── */
