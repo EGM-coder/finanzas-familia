@@ -965,6 +965,26 @@ Vista de conciliación de nóminas Nordex a nivel mes. Cruza `incomes` (source=`
 
 ---
 
+### 3.15 · `public.v_cuentas_composicion` *(mig 53)*
+
+Agrega el patrimonio por `(titular × segmento de liquidez)`. Alimenta el donut y la espina por titular del módulo /cuentas.
+
+**Columnas:**
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `titular` | text | `eric` / `ana` / `comun` / `leo` / `biel` |
+| `segmento` | text | `Efectivo` / `Renta variable + ETF` / `Fondos indexados` / `Roboadvisor` / `Cripto` / `Otros` |
+| `orden` | int | Orden de visualización: 1 Efectivo, 2 RV+ETF, 3 FI, 4 Roboadvisor, 5 Cripto, 9 Otros |
+| `valor` | numeric | Suma de saldos/valoraciones en EUR para ese (titular, segmento) |
+
+**Fuentes:** `accounts` + `account_balances_full` (Efectivo) · `holdings_valued` (cotizados) · `manual_holdings` (Roboadvisor).  
+**Filtro:** `is_active = true` en todas las tablas base.  
+**Security_invoker:** true — la RLS de `accounts` filtra por `visibility` según el usuario invocante; Eric no ve cuentas de Ana y viceversa.  
+**GRANT:** SELECT a `authenticated`.
+
+---
+
 ## 4 · GRANTs resumen por tabla
 
 | Tabla | authenticated SELECT | INSERT | UPDATE | DELETE | Notas |
@@ -1065,6 +1085,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260607000050 | `income_charges.sql` | income_charges M:N (UNIQUE income_id+transaction_id) + v_income_reconciliation; RLS+GRANT las 4 ops |
 | 20260610000051 | `fix_transferencias_nature_rules.sql` | mig-51 PARCHE DATOS (solo DML, sin DDL) — 6 txns Leo/Biel (Feb+Abr) → nature='transferencia'; regla Ana (fijo_recurrente→transferencia), regla Biel (inversion→transferencia + match_value robusto), regla Leo nueva (transferencia, categoría 'Aportación cuenta de ahorro'). Idempotente. |
 | 20260612000052 | `titular_accounts.sql` | mig-52: ADD COLUMN `titular` text NOT NULL CHECK(eric\|ana\|comun\|leo\|biel) en `accounts`. Backfill por nombre (Leo/Biel) y visibility (privada_eric→eric, privada_ana→ana, compartida→comun). Eje de propiedad/destino; distinto de `visibility` (muro de privacidad). Base de la espina por titular y futura sucesión. |
+| 20260612000053 | `v_cuentas_composicion.sql` | mig-53: CREATE VIEW `v_cuentas_composicion` WITH (security_invoker=true) — agrega patrimonio por (titular × segmento: Efectivo/RV+ETF/FI/Roboadvisor/Cripto). Fuentes: account_balances_full + holdings_valued + manual_holdings. GRANT SELECT a authenticated. Alimenta donut y espina por titular de /cuentas. |
 
 ---
 
