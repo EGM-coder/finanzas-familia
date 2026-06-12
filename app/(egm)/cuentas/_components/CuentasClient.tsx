@@ -1,7 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
 import type {
-  ComposicionRow, DetalleRow, HoldingRow, ManualHoldingRow, PricePoint, StockOptionRow,
+  ComposicionRow, DetalleRow, HoldingRow, ManualHoldingRow, PricePoint, StockOptionRow, TxRow,
 } from '../page'
 import { AsesorPanel }      from './AsesorPanel'
 import { ComposicionPanel } from './ComposicionPanel'
@@ -22,6 +22,7 @@ type Props = {
   pricesByTicker:  Record<string, PricePoint[]>
   pricesByIsin:    Record<string, PricePoint[]>
   manualHoldings:  ManualHoldingRow[]
+  txnsByAccount:   Record<string, TxRow[]>
 }
 
 type NavFrame =
@@ -53,6 +54,7 @@ export function CuentasClient({
   rows, totalByTitular, totalTodo,
   stockOptions, holdings,
   detalleRows, pricesByTicker, pricesByIsin, manualHoldings,
+  txnsByAccount,
 }: Props) {
   const titulares = TITULAR_ORDER.filter(t => totalByTitular[t] != null)
   const [active, setActive]     = useState<string>('todo')
@@ -171,6 +173,7 @@ export function CuentasClient({
           detalleRows={detalleRows}
           holdings={holdings}
           manualHoldings={manualHoldings}
+          txnsByAccount={txnsByAccount}
           onSelectPosition={(holdingId, positionName) =>
             push({ view: 'posicion', holdingId, positionName, accountId: frame.accountId })
           }

@@ -57,13 +57,27 @@ export type ManualHoldingRow = {
 
 export type PricePoint = { date: string; close_eur: number }
 
+export type TxRow = {
+  account_id:   string
+  date:         string
+  description:  string | null
+  counterparty: string | null
+  amount:       number
+  nature:       string | null
+  category_id:  string | null
+}
+
+const CASH_TYPES = ['bank', 'cash', 'tesoreria_tae'] as const
+
 export default async function CuentasPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const ninetyDaysAgo    = new Date(Date.now() -  90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const hundredTwentyAgo = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
+  // ── Round 1 (all parallel) ─────────────────────────────────────
   const [composicionRes, stockOptRes, holdingsRes, accountsRes, detalleRes, pricesRes, manualRes] =
     await Promise.all([
       supabase
@@ -80,7 +94,7 @@ export default async function CuentasPage() {
         .eq('is_active', true),
       supabase
         .from('accounts')
-        .select('id, titular')
+        .select('id, titular, type')   // type needed to identify cash accounts
         .eq('is_active', true),
       supabase
         .from('v_cuentas_detalle')
@@ -101,6 +115,42 @@ export default async function CuentasPage() {
 
   if (composicionRes.error) throw composicionRes.error
 
+  // ── Accounts ──────────────────────────────────────────────────
+  const accountsData = accountsRes.data ?? []
+  const accountTitular = new Map<string, string>(
+    accountsData.map(a => [a.id as string, a.titular as string])
+  )
+  const cashAccountIds = accountsData
+    .filter(a => CASH_TYPES.includes(a.type as typeof CASH_TYPES[number]))
+    .map(a => a.id as string)
+
+  // ── Round 2: transactions (sequential — needs cashAccountIds) ──
+  let txnsByAccount: Record<string, TxRow[]> = {}
+  if (cashAccountIds.length > 0) {
+    const txnsRes = await supabase
+      .from('transactions')
+      .select('account_id, date, description, counterparty, amount, nature, category_id')
+      .is('superseded_by', null)
+      .in('account_id', cashAccountIds)
+      .gte('date', hundredTwentyAgo)
+      .order('date', { ascending: false })
+
+    for (const t of (txnsRes.data ?? [])) {
+      const aid = t.account_id as string
+      if (!txnsByAccount[aid]) txnsByAccount[aid] = []
+      txnsByAccount[aid].push({
+        account_id:   aid,
+        date:         t.date         as string,
+        description:  t.description  as string | null,
+        counterparty: t.counterparty as string | null,
+        amount:       Number(t.amount),
+        nature:       t.nature       as string | null,
+        category_id:  t.category_id  as string | null,
+      })
+    }
+  }
+
+  // ── Composición ───────────────────────────────────────────────
   const rows: ComposicionRow[] = (composicionRes.data ?? []).map(r => ({
     titular:  r.titular  as string,
     segmento: r.segmento as string,
@@ -114,6 +164,7 @@ export default async function CuentasPage() {
   }
   const totalTodo = Object.values(totalByTitular).reduce((s, v) => s + v, 0)
 
+  // ── Stock options ─────────────────────────────────────────────
   const stockOptions: StockOptionRow[] = (stockOptRes.data ?? []).map(o => ({
     package_name:          o.package_name as string,
     num_options:           Number(o.num_options),
@@ -126,17 +177,15 @@ export default async function CuentasPage() {
     price_date:            o.price_date as string | null,
   }))
 
-  const accountTitular = new Map<string, string>(
-    (accountsRes.data ?? []).map(a => [a.id as string, a.titular as string])
-  )
+  // ── Holdings ──────────────────────────────────────────────────
   const holdings: HoldingRow[] = (holdingsRes.data ?? [])
     .map(h => ({
       id:                h.id as string,
       account_id:        h.account_id as string,
       ticker:            h.ticker as string | null,
-      isin:              h.isin as string | null,
-      name:              h.name as string,
-      asset_type:        h.asset_type as string,
+      isin:              h.isin   as string | null,
+      name:              h.name   as string,
+      asset_type:        h.asset_type        as string,
       original_currency: h.original_currency as string,
       quantity:          Number(h.quantity),
       current_price_eur: h.current_price_eur != null ? Number(h.current_price_eur) : null,
@@ -145,6 +194,7 @@ export default async function CuentasPage() {
     }))
     .filter(h => h.titular !== '')
 
+  // ── Detalle ───────────────────────────────────────────────────
   const detalleRows: DetalleRow[] = (detalleRes.data ?? []).map(r => ({
     account_id:  r.account_id as string,
     name:        r.name        as string,
@@ -156,6 +206,7 @@ export default async function CuentasPage() {
     valor:       Number(r.valor),
   }))
 
+  // ── Prices ────────────────────────────────────────────────────
   const pricesByTicker: Record<string, PricePoint[]> = {}
   const pricesByIsin:   Record<string, PricePoint[]> = {}
   for (const p of (pricesRes.data ?? [])) {
@@ -171,6 +222,7 @@ export default async function CuentasPage() {
     }
   }
 
+  // ── Manual holdings ───────────────────────────────────────────
   const manualHoldings: ManualHoldingRow[] = (manualRes.data ?? []).map(m => ({
     id:                m.id                as string,
     account_id:        m.account_id        as string,
@@ -191,6 +243,7 @@ export default async function CuentasPage() {
       pricesByTicker={pricesByTicker}
       pricesByIsin={pricesByIsin}
       manualHoldings={manualHoldings}
+      txnsByAccount={txnsByAccount}
     />
   )
 }
