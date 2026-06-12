@@ -1,12 +1,14 @@
 'use client'
 import { useMemo, useState } from 'react'
-import type { ComposicionRow } from '../page'
+import type { ComposicionRow, StockOptionRow } from '../page'
 import { ComposicionPanel } from './ComposicionPanel'
+import { ContingenciaPanel } from './ContingenciaPanel'
 
 type Props = {
   rows:           ComposicionRow[]
   totalByTitular: Record<string, number>
   totalTodo:      number
+  stockOptions:   StockOptionRow[]
 }
 
 const LABEL: Record<string, string> = {
@@ -29,7 +31,7 @@ const CARD: React.CSSProperties = {
   padding:      '20px 22px',
 }
 
-export function CuentasClient({ rows, totalByTitular, totalTodo }: Props) {
+export function CuentasClient({ rows, totalByTitular, totalTodo, stockOptions }: Props) {
   const titulares = TITULAR_ORDER.filter(t => totalByTitular[t] != null)
   const [active, setActive] = useState<string>('todo')
 
@@ -118,10 +120,13 @@ export function CuentasClient({ rows, totalByTitular, totalTodo }: Props) {
           <span className="roman" style={{ fontSize: 11, alignSelf: 'flex-end' }}>—</span>
         </div>
 
-        {/* U5 — Contingente */}
-        <div className="card" style={{ ...CARD, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <span className="label">Contingente</span>
-          <span className="roman" style={{ fontSize: 11, alignSelf: 'flex-end' }}>—</span>
+        {/* U5 — Contingente (acento izquierdo; no suma al total) */}
+        <div className="card" style={{ ...CARD, borderLeft: '2px solid var(--ink-3)' }}>
+          <ContingenciaPanel
+            options={stockOptions}
+            active={active}
+            activeLabel={activeLabel}
+          />
         </div>
       </div>
     </div>
