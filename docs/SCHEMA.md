@@ -58,7 +58,8 @@
 | `name` | text NOT NULL | |
 | `institution` | text NOT NULL | |
 | `type` | text NOT NULL | CHECK: `bank`, `investment`, `broker`, `cash`, `pension`, `card` (mig 07), `tesoreria_tae` (mig 10) |
-| `visibility` | text NOT NULL | CHECK: `privada_eric`, `privada_ana`, `compartida` |
+| `visibility` | text NOT NULL | CHECK: `privada_eric`, `privada_ana`, `compartida` — muro de privacidad (quién puede VER la cuenta) |
+| `titular` | text NOT NULL | CHECK: `eric`, `ana`, `comun`, `leo`, `biel` (mig 52) — eje de propiedad/destino; distinto de `visibility`: `titular` es de quién ES la cuenta, `visibility` es quién la puede leer. Herencia/sucesión = reasignar `titular`. |
 | `currency` | text NOT NULL | DEFAULT 'EUR' |
 | `is_active` | bool NOT NULL | DEFAULT true |
 | `notes` | text | |
@@ -68,7 +69,7 @@
 | `created_at` | timestamptz NOT NULL | DEFAULT now() |
 | `updated_at` | timestamptz NOT NULL | DEFAULT now(); trigger set_updated_at |
 
-**Constraints:** `accounts_card_linked_check` — (type='card' AND linked_account_id IS NOT NULL) OR (type≠'card' AND linked_account_id IS NULL).  
+**Constraints:** `accounts_card_linked_check` — (type='card' AND linked_account_id IS NOT NULL) OR (type≠'card' AND linked_account_id IS NULL). `accounts_titular_check` — titular IN ('eric','ana','comun','leo','biel') (mig 52).  
 **Índices:** `accounts_linked_idx` on (linked_account_id).  
 **RLS:** Grupo C (mig 32 guard).
 
@@ -1063,6 +1064,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260606000049 | `incomes_source_nordex_payslip.sql` | incomes.source CHECK ampliado: añade 'nordex_payslip' para worker parse_nominas |
 | 20260607000050 | `income_charges.sql` | income_charges M:N (UNIQUE income_id+transaction_id) + v_income_reconciliation; RLS+GRANT las 4 ops |
 | 20260610000051 | `fix_transferencias_nature_rules.sql` | mig-51 PARCHE DATOS (solo DML, sin DDL) — 6 txns Leo/Biel (Feb+Abr) → nature='transferencia'; regla Ana (fijo_recurrente→transferencia), regla Biel (inversion→transferencia + match_value robusto), regla Leo nueva (transferencia, categoría 'Aportación cuenta de ahorro'). Idempotente. |
+| 20260612000052 | `titular_accounts.sql` | mig-52: ADD COLUMN `titular` text NOT NULL CHECK(eric\|ana\|comun\|leo\|biel) en `accounts`. Backfill por nombre (Leo/Biel) y visibility (privada_eric→eric, privada_ana→ana, compartida→comun). Eje de propiedad/destino; distinto de `visibility` (muro de privacidad). Base de la espina por titular y futura sucesión. |
 
 ---
 
