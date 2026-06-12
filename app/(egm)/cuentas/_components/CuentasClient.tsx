@@ -1,6 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
-import type { ComposicionRow, StockOptionRow } from '../page'
+import type { ComposicionRow, HoldingRow, StockOptionRow } from '../page'
+import { AsesorPanel } from './AsesorPanel'
 import { ComposicionPanel } from './ComposicionPanel'
 import { ContingenciaPanel } from './ContingenciaPanel'
 
@@ -9,6 +10,7 @@ type Props = {
   totalByTitular: Record<string, number>
   totalTodo:      number
   stockOptions:   StockOptionRow[]
+  holdings:       HoldingRow[]
 }
 
 const LABEL: Record<string, string> = {
@@ -31,7 +33,7 @@ const CARD: React.CSSProperties = {
   padding:      '20px 22px',
 }
 
-export function CuentasClient({ rows, totalByTitular, totalTodo, stockOptions }: Props) {
+export function CuentasClient({ rows, totalByTitular, totalTodo, stockOptions, holdings }: Props) {
   const titulares = TITULAR_ORDER.filter(t => totalByTitular[t] != null)
   const [active, setActive] = useState<string>('todo')
 
@@ -115,9 +117,13 @@ export function CuentasClient({ rows, totalByTitular, totalTodo, stockOptions }:
         </div>
 
         {/* U8 — Asesor */}
-        <div className="card" style={{ ...CARD, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <span className="label">Asesor</span>
-          <span className="roman" style={{ fontSize: 11, alignSelf: 'flex-end' }}>—</span>
+        <div className="card" style={{ ...CARD, display: 'flex', flexDirection: 'column' }}>
+          <AsesorPanel
+            holdings={holdings}
+            active={active}
+            total={total}
+            activeSegmentos={activeSegmentos}
+          />
         </div>
 
         {/* U5 — Contingente (acento izquierdo; no suma al total) */}
