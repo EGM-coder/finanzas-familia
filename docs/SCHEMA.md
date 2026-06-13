@@ -747,6 +747,28 @@ A diferencia de `purchase_order_charges` (UNIQUE en `transaction_id`), aquí el 
 
 ---
 
+### 2.32 · `public.shares` *(mig 55)*
+
+Concesiones de visibilidad entre titulares. Asimétrica (una fila por dirección), revocable (`is_active`). El muro por defecto sigue siendo `accounts.visibility`; `shares` monta la relación encima. Granularidad: bucket entero (sin `account_id`). El helper `can_see_visibility()` (Mig 56) consumirá esta tabla.
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | `gen_random_uuid()` |
+| `grantor_role` | text NOT NULL | CHECK: `eric`, `ana` — quien otorga |
+| `grantee_role` | text NOT NULL | CHECK: `eric`, `ana` — quien recibe |
+| `scope` | text NOT NULL | CHECK: `private_detail` (acceso Y/N al detalle privado), `aggregate` (reservado, no enforced por RLS de fila), `continuity` (sucesión pre-armada, nace inactiva) |
+| `is_active` | boolean NOT NULL | DEFAULT true; poner a false = revocar sin borrar |
+| `note` | text | Descripción opcional del acto de concesión |
+| `created_at` | timestamptz NOT NULL | DEFAULT now() |
+| `updated_at` | timestamptz NOT NULL | DEFAULT now(); trigger `trg_shares_updated_at` → `set_updated_at()` |
+
+**Constraints:** `shares_no_self` CHECK (`grantor_role <> grantee_role`); `shares_unique_grant` UNIQUE (`grantor_role, grantee_role, scope`).  
+**RLS:** SELECT — si participas (`grantor_role = user_role()` OR `grantee_role = user_role()`); INSERT/UPDATE/DELETE — solo como grantor (`grantor_role = user_role()`). Guard `auth.uid() IS NOT NULL` en todas las policies.  
+**GRANT:** SELECT, INSERT, UPDATE, DELETE a `authenticated` (INV-6).  
+**Seed:** 2 filas de continuidad pre-armadas (`eric→ana` y `ana→eric`), ambas con `is_active=false`. Se activan con acto deliberado.
+
+---
+
 ## 3 · Vistas
 
 ### 3.1 · `public.account_balances` *(mig 09)*
@@ -1043,6 +1065,7 @@ Como `v_cuentas_composicion` pero a nivel de **cuenta individual** (`account_id`
 | `purchase_order_lines` | ✓ RLS | ✓ mig 36 | ✓ mig 36 | — | via can_see_order() |
 | `purchase_order_charges` | ✓ RLS | ✓ mig 37 | ✓ mig 37 | ✓ mig 42+44 | via can_see_transaction() |
 | `income_charges` | ✓ mig 50 | ✓ mig 50 | ✓ mig 50 | ✓ mig 50 | can_see_transaction() + incomes.user_id |
+| `shares` | ✓ mig 55 | ✓ mig 55 | ✓ mig 55 | ✓ mig 55 | SELECT si participas; INSERT/UPDATE/DELETE solo como grantor |
 
 ---
 
@@ -1112,6 +1135,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260612000052 | `titular_accounts.sql` | mig-52: ADD COLUMN `titular` text NOT NULL CHECK(eric\|ana\|comun\|leo\|biel) en `accounts`. Backfill por nombre (Leo/Biel) y visibility (privada_eric→eric, privada_ana→ana, compartida→comun). Eje de propiedad/destino; distinto de `visibility` (muro de privacidad). Base de la espina por titular y futura sucesión. |
 | 20260612000053 | `v_cuentas_composicion.sql` | mig-53: CREATE VIEW `v_cuentas_composicion` WITH (security_invoker=true) — agrega patrimonio por (titular × segmento: Efectivo/RV+ETF/FI/Roboadvisor/Cripto). Fuentes: account_balances_full + holdings_valued + manual_holdings. GRANT SELECT a authenticated. Alimenta donut y espina por titular de /cuentas. |
 | 20260612000054 | `v_cuentas_detalle.sql` | mig-54: CREATE VIEW `v_cuentas_detalle` WITH (security_invoker=true) — igual que v_cuentas_composicion pero a nivel de cuenta individual (account_id). Añade name, institution, visibility. Alimenta drill-down U4 de /cuentas. Verificado: SUM = v_cuentas_composicion para todos los titulares. |
+| 20260613000055 | `shares.sql` | B2: tabla `shares` (compartición asimétrica + continuidad pre-armada). RLS: SELECT si participas; INSERT/UPDATE/DELETE solo como grantor. Seed 2 filas continuidad inactivas (eric↔ana). |
 
 ---
 
