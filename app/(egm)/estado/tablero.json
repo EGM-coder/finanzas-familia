@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "revision": "9d668cb",
+    "fecha": "13·vi·26"
+  },
+  "bloque_actual": "B2 · Muro multiusuario",
+  "bloque_estado": "cerrado",
+  "foco": "Tablero de estado",
+  "hecho": [
+    {"mk":"mód","tx":"Inicio · Control · Cuentas · Nóminas · Pedidos · Planner/ZBB","nota":"6 módulos"},
+    {"mk":"psd2","tx":"Sync live Kutxabank + Santander","nota":"cron 22:35 UTC"},
+    {"mk":"55–58","tx":"B2 muro privacidad: shares, can_see_visibility, fugas selladas","nota":"compartir = solo lectura"},
+    {"mk":"59","tx":"Auto-dedupe PENDING→BOOKED","nota":"fn_supersede_pending_booked + hook job"},
+    {"mk":"P-020","tx":"CategoryCombobox: selección en cualquier nivel","nota":""},
+    {"mk":"datos","tx":"Wooloomooloo + 20 duplicados de junio neutralizados","nota":""}
+  ],
+  "pendiente": [
+    {"tx":"Primer cierre mensual como acto deliberado","nota":"snapshot recomputable, opción B"},
+    {"tx":"AI Advisor","nota":"sellado a DB + corpus de dominio versionado"},
+    {"tx":"Integrar cuentas de inversión en Cuentas","nota":"cobertura PSD2"},
+    {"tx":"ZBB rethink: plan base instanciado + deltas","nota":""}
+  ],
+  "horizonte": [
+    {"mk":"II","tx":"Módulo Proyectos","nota":"+ viajes como tipo de project"},
+    {"mk":"capa","tx":"2 · Retribución  ·  3 · Previsión","nota":""},
+    {"mk":"T-007","tx":"Attachments polimórficos (tickets, nóminas, facturas)","nota":""},
+    {"mk":"T-008","tx":"Parsing automático de PDF de nóminas","nota":""},
+    {"mk":"fase5","tx":"Admin UI de taxonomía/categorías","nota":""}
+  ],
+  "decisiones": [
+    {"tx":"Viaje: ¿tipo de project (reutiliza project_id + presupuesto) o entidad propia?","nota":"tu llamada"},
+    {"tx":"projects / maristas_items visibles a Ana al entrar","nota":"compartido por diseño — confirmar"}
+  ],
+  "deuda": [
+    {"mk":"grant","tx":"GRANT UPDATE en accounts para authenticated","nota":"falta para reasignación de titular / herencia"},
+    {"mk":"P-021","tx":"Commiteado ≠ pusheado ≠ desplegado","nota":"ritual: git status -sb + push + deploy READY — pendiente registrar"},
+    {"mk":"vista","tx":"v_median_income_3m en null hasta ~julio","nota":"≥3 meses de histórico"},
+    {"mk":"links","tx":"bank_account_links aún no share-aware","nota":"conservador, sin fuga"},
+    {"mk":"shares","tx":"Función de agregado de hogar reservada, sin construir","nota":""}
+  ]
+}

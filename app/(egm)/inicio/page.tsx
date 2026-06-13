@@ -340,6 +340,13 @@ export default async function InicioPage() {
             </div>
           </div>
 
+          {/* TODO: acceso tenue /estado — ubicación final pendiente decisión Eric */}
+          <div style={{ marginTop: 28, textAlign: 'right' }}>
+            <Link href="/estado" className="roman" style={{ fontSize: 11, color: 'var(--ink-4)', textDecoration: 'none' }}>
+              estado →
+            </Link>
+          </div>
+
           {/* Contingente · fuera del neto */}
           <div style={{ marginTop: 18 }}>
             <div className="label" style={{ marginBottom: 10 }}>
