@@ -38,23 +38,18 @@ export function CategoryCombobox({ categories, value, onChange }: Props) {
     return () => document.removeEventListener('keydown', handler)
   }, [])
 
-  // IDs that are referenced as parent_id by at least one other category
-  const branchIds = new Set(
-    categories.filter(c => c.parent_id !== null).map(c => c.parent_id as string)
-  )
-
-  // Walk up the tree to find the root ancestor (parent_id === null)
-  function rootAncestor(c: Category): Category {
-    if (c.parent_id === null) return c
-    const p = categories.find(x => x.id === c.parent_id)
-    return p ? rootAncestor(p) : c
-  }
-
   // Root-level categories (group headings)
   const roots = categories.filter(c => c.parent_id === null)
 
-  // Selectable: any category that has no children (leaf at any depth, including depth 0)
-  const selectables = categories.filter(c => !branchIds.has(c.id))
+  // DFS from rootId; depth 1 = direct child of root. All non-root nodes are selectable.
+  function treeItems(rootId: string): Array<{ cat: Category; depth: number }> {
+    function walk(parentId: string, depth: number): Array<{ cat: Category; depth: number }> {
+      return categories
+        .filter(c => c.parent_id === parentId)
+        .flatMap(c => [{ cat: c, depth }, ...walk(c.id, depth + 1)])
+    }
+    return walk(rootId, 1)
+  }
 
   const selectedCat = value ? categories.find(c => c.id === value) : null
 
@@ -202,7 +197,7 @@ export function CategoryCombobox({ categories, value, onChange }: Props) {
               </Command.Empty>
 
               {roots.map(root => {
-                const items = selectables.filter(c => rootAncestor(c).id === root.id)
+                const items = treeItems(root.id)
                 if (items.length === 0) return null
                 return (
                   <Command.Group
@@ -210,7 +205,7 @@ export function CategoryCombobox({ categories, value, onChange }: Props) {
                     heading={root.name}
                     style={{ listStyle: 'none', margin: 0, padding: 0 }}
                   >
-                    {items.map(cat => (
+                    {items.map(({ cat, depth }) => (
                       <Command.Item
                         key={cat.id}
                         value={`${root.name} ${cat.name}`}
@@ -220,6 +215,7 @@ export function CategoryCombobox({ categories, value, onChange }: Props) {
                         }}
                         style={{
                           padding: '10px 14px',
+                          paddingLeft: 14 * depth,
                           fontFamily: 'var(--sans)',
                           fontSize: 14,
                           color: 'var(--ink-1)',

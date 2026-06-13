@@ -279,6 +279,19 @@ Ambos esquemas coexistían y no se deduplicaban entre sí. Resultado: 5 transacc
 
 ---
 
+## P-020 · 13-jun-2026 · **RESUELTO**
+**CategoryCombobox: selección en cualquier nivel de la taxonomía (fix bug hojas-only en 3 niveles)**
+
+Con la taxonomía expandida a tres niveles (ej. Alimentación → Supermercado → Vino), los nodos intermedios dejaron de ser seleccionables en el picker de categorización. "Supermercado" (af369d7d, 28 transacciones) desapareció de la lista al ganar el hijo "Vino", aunque seguía siendo un `category_id` válido en `transactions`.
+
+**Raíz:** `CategoryCombobox` computaba `branchIds` (IDs con al menos un hijo) y filtraba `selectables = categories.filter(c => !branchIds.has(c.id))` — solo hojas puras. Al crecer la taxonomía, cualquier nodo intermedio quedaba invisible.
+
+**Solución:** eliminada la lógica `branchIds`/`selectables`. Reemplazada por `treeItems(rootId)` (DFS desde la raíz del grupo) que devuelve todos los nodos con su profundidad. El rendering usa `paddingLeft: 14 * depth` para la indentación visual. Todos los nodos no-raíz son seleccionables. Archivo: `app/(egm)/control/_components/CategoryCombobox.tsx`.
+
+**Fuera de alcance:** roll-up de totales padre-incluye-hijos en reporting (hilo separado).
+
+---
+
 ## Doctrinas activas
 
 | ID | Doctrina | Registrada |
