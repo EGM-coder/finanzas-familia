@@ -125,7 +125,7 @@ export default async function CuentasPage() {
     .map(a => a.id as string)
 
   // ── Round 2: transactions (sequential — needs cashAccountIds) ──
-  let txnsByAccount: Record<string, TxRow[]> = {}
+  const txnsByAccount: Record<string, TxRow[]> = {}
   if (cashAccountIds.length > 0) {
     const txnsRes = await supabase
       .from('transactions')

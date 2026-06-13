@@ -2,7 +2,6 @@
 import { useEffect, useReducer, useState } from 'react'
 import { toast } from 'sonner'
 import { SectionTitle } from '@/components/egm/SectionTitle'
-import { ParamRow } from '@/components/egm/ParamRow'
 import { EditorialBlock } from '@/components/egm/EditorialBlock'
 import { Btn } from '@/components/egm'
 import { fmtAmount, fmtDate } from '@/app/(egm)/_lib/formatters'
