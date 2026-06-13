@@ -12,8 +12,9 @@
 - **RLS habilitado** en todas las tablas. Nunca `service_role` en frontend.
 - **Patrones de policy (3 grupos):**
   - **Grupo A** (estricto, por user_id): `incomes`, `work_abroad_days`, `bank_connections` — solo el dueño.
-  - **Grupo C** (tri-state visibility): `accounts`, `assets`, `budgets`, `categories`, `liabilities`, `savings_goals`, `weekly_closures`, `monthly_closures` — `auth.uid() IS NOT NULL AND (visibility='privada_'||user_role() OR visibility='compartida')`. Guard `auth.uid() IS NOT NULL` añadido en mig 32 (antes anon key podía leer `compartida`).
-  - **Grupo D** (función helper): `transactions`, `holdings`, `transaction_splits`, `bank_account_links` — `can_see_account()` o `can_see_transaction()`, ambas con `auth.uid() IS NOT NULL` desde mig 32.
+  - **Grupo C** (tri-state visibility): `accounts`, `assets`, `budgets`, `categories`, `liabilities`, `savings_goals`, `weekly_closures`, `monthly_closures` — `auth.uid() IS NOT NULL AND (visibility='privada_'||user_role() OR visibility='compartida')`. Guard `auth.uid() IS NOT NULL` añadido en mig 32. **SELECT de `accounts` es share-aware desde mig 56 (usa `can_see_visibility()`).**
+  - **Grupo D** (función helper): `transactions`, `holdings`, `transaction_splits`, `bank_account_links` — `can_see_account()` o `can_see_transaction()`, ambas con `auth.uid() IS NOT NULL` desde mig 32. **SELECT de `holdings` y `transactions` son share-aware desde mig 56 (usan `can_read_account()`).**
+- **Principio B2 (compartir = solo lectura, mig 56):** `can_see_visibility()` y `can_read_account()` amplían el acceso de lectura si existe una fila activa en `shares` (scope `private_detail` o `continuity`). Las policies de INSERT/UPDATE/DELETE no se tocan — `can_see_account()` sigue siendo el guard de escritura.
 - **Visibilidad tri-state:** `privada_eric` | `privada_ana` | `compartida`. Aplica a `accounts`, `assets`, `budgets`, `savings_goals`, `liabilities`, `categories` (cuando `is_default=false`), `weekly_closures`, `monthly_closures`.
 - **Tablas públicas (mercado):** `holding_prices`, `currency_rates` — SELECT con `TRUE`, sin restricción de usuario.
 - **Tablas compartidas sin filtro V1:** `stock_options`, `manual_holdings`, `manual_holdings_history`, `maristas_items`, `projects`, `stock_prices` — `auth.role()='authenticated'`.
@@ -31,8 +32,14 @@
 ### `public.set_updated_at() → trigger`
 `plpgsql` — Setea `new.updated_at = now()` antes de UPDATE. Aplicada via trigger en todas las tablas con `updated_at`.
 
+### `public.can_see_visibility(p_visibility text) → boolean` *(mig 56)*
+`sql SECURITY DEFINER STABLE` — Helper share-aware para lectura. Retorna `true` si: (a) `p_visibility = 'compartida'`; (b) `p_visibility = 'privada_' || user_role()`; o (c) existe en `shares` una fila activa (`is_active=true`, `scope IN ('private_detail','continuity')`) donde `grantee_role = user_role()` y `grantor_role` coincide con la parte privada de `p_visibility`. `auth.uid() IS NOT NULL` implícito. Usada en: policy SELECT de `accounts`; internamente por `can_read_account()`.
+
+### `public.can_read_account(p_account_id uuid) → boolean` *(mig 56)*
+`sql SECURITY DEFINER STABLE` — Llama a `can_see_visibility(a.visibility)` para la cuenta dada. Usada en: policies SELECT de `holdings` y `transactions`. **No sustituye `can_see_account()`** — ésta sigue activa en INSERT/UPDATE y en `bank_account_links`.
+
 ### `public.can_see_account(p_account_id uuid) → boolean`
-`sql SECURITY DEFINER STABLE` — `auth.uid() IS NOT NULL AND EXISTS(SELECT 1 FROM accounts WHERE id=p_account_id AND visibility matches)`. Usada en: `transactions`, `holdings`, `bank_account_links`.
+`sql SECURITY DEFINER STABLE` — `auth.uid() IS NOT NULL AND EXISTS(SELECT 1 FROM accounts WHERE id=p_account_id AND visibility matches)`. Guard de escritura para INSERT/UPDATE en `transactions`, `holdings`, `bank_account_links`. **No share-aware** (deliberado: compartir es solo lectura).
 
 ### `public.can_see_transaction(p_transaction_id uuid) → boolean`
 `sql SECURITY DEFINER STABLE` — Navega `transaction_splits → transactions → accounts`, verifica visibility con `auth.uid() IS NOT NULL`. Usada en: `transaction_splits`.
@@ -1136,6 +1143,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260612000053 | `v_cuentas_composicion.sql` | mig-53: CREATE VIEW `v_cuentas_composicion` WITH (security_invoker=true) — agrega patrimonio por (titular × segmento: Efectivo/RV+ETF/FI/Roboadvisor/Cripto). Fuentes: account_balances_full + holdings_valued + manual_holdings. GRANT SELECT a authenticated. Alimenta donut y espina por titular de /cuentas. |
 | 20260612000054 | `v_cuentas_detalle.sql` | mig-54: CREATE VIEW `v_cuentas_detalle` WITH (security_invoker=true) — igual que v_cuentas_composicion pero a nivel de cuenta individual (account_id). Añade name, institution, visibility. Alimenta drill-down U4 de /cuentas. Verificado: SUM = v_cuentas_composicion para todos los titulares. |
 | 20260613000055 | `shares.sql` | B2: tabla `shares` (compartición asimétrica + continuidad pre-armada). RLS: SELECT si participas; INSERT/UPDATE/DELETE solo como grantor. Seed 2 filas continuidad inactivas (eric↔ana). |
+| 20260613000056 | `can_see_visibility.sql` | B2: `can_see_visibility(text)` + `can_read_account(uuid)` share-aware. Repunta SELECT de `accounts`, `holdings`, `transactions`. Escritura (can_see_account) intacta. |
 
 ---
 
