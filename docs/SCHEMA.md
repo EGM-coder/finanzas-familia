@@ -47,6 +47,11 @@
 ### `public.can_see_order(p_order_id uuid) → boolean`
 `sql SECURITY DEFINER STABLE` — `auth.uid() IS NOT NULL AND EXISTS(SELECT 1 FROM purchase_orders WHERE id=p_order_id AND visibility matches)`. Usada en: `purchase_order_lines`.
 
+### `public.fn_supersede_pending_booked() → integer` *(mig 59)*
+`plpgsql SECURITY DEFINER` — Auto-resuelve el trap PSD2 PENDING→BOOKED. Busca pares donde una fila `h_*` (PENDING, hash) y una fila `er_*` (BOOKED, entry_reference) comparten `account_id`, `date`, `amount` y `description` (IS NOT DISTINCT FROM). Para cada par marca la fila `h_` como `superseded_by = er_.id`. Usa `DISTINCT ON (h.id)` para garantizar 1 er_ canónica por h_. Devuelve el número de filas neutralizadas. **Llamada por `sync_psd2.py` al final de cada run en modo LIVE** (no en DRY_RUN). Seguridad: solo toca `h_` con gemela `er_` confirmada; nunca fusiona dos `er_` (caso Iberia: mismo importe, misma fecha, dos cargos reales → no hay h_ → no se toca); `h_` huérfanas sin gemela quedan intactas para revisión humana. `GRANT EXECUTE TO authenticated` no es necesario — la llama el worker con `service_role`.
+
+**Doctrina PENDING→BOOKED:** los duplicados `h_`/`er_` se auto-resuelven aquí. Los casos ambiguos (dos `er_` con mismo contenido, `h_` huérfana) se dejan para revisión humana; no existe lógica automática que los fusione.
+
 ### `public.capture_patrimonio_snapshot() → patrimonio_snapshots`
 `plpgsql SECURITY DEFINER` — Lee vista `patrimonio_neto`, hace UPSERT ON CONFLICT `(snapshot_date)`. `GRANT EXECUTE TO authenticated`.
 
@@ -1148,6 +1153,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260613000056 | `can_see_visibility.sql` | B2: `can_see_visibility(text)` + `can_read_account(uuid)` share-aware. Repunta SELECT de `accounts`, `holdings`, `transactions`. Escritura (can_see_account) intacta. |
 | 20260613000057 | `rls_manual_holdings.sql` | B2: cierra fuga manual_holdings + _history. De ALL permisivo a Grupo D: SELECT can_read_account; INSERT/UPDATE/DELETE can_see_account. |
 | 20260613000058 | `rls_stock_options.sql` | B2 final: añade owner_role (NOT NULL, backfill 'eric'); RLS por operación: SELECT can_see_visibility share-aware, escritura owner-only. stock_options_valued hereda automáticamente. |
+| 20260613000059 | `fn_supersede_pending_booked.sql` | fn_supersede_pending_booked(): auto-dedupe PENDING(h_)→BOOKED(er_) por content-match. Llamada por sync_psd2.py end-of-run en LIVE. |
 
 ---
 

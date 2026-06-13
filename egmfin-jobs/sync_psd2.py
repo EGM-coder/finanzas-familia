@@ -448,6 +448,14 @@ def sync_psd2():
             'last_sync_at': datetime.now(timezone.utc).isoformat()
         }).eq('id', link['id']).execute()
 
+    if not DRY_RUN:
+        try:
+            res = sb.rpc('fn_supersede_pending_booked').execute()
+            n_dedup = res.data if isinstance(res.data, int) else (res.data or 0)
+            logger.info(f'🧹 {n_dedup} duplicados PENDING→BOOKED neutralizados')
+        except Exception as e:
+            logger.warning(f'⚠️  dedupe PENDING→BOOKED falló: {e}')
+
     logger.info(
         f'✅ Sync completada · {total_txns} descargadas · '
         f'{total_inserted} insertadas ({total_rules_applied} con regla) · '
