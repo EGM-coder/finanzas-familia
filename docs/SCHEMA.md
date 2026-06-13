@@ -13,11 +13,11 @@
 - **Patrones de policy (3 grupos):**
   - **Grupo A** (estricto, por user_id): `incomes`, `work_abroad_days`, `bank_connections` — solo el dueño.
   - **Grupo C** (tri-state visibility): `accounts`, `assets`, `budgets`, `categories`, `liabilities`, `savings_goals`, `weekly_closures`, `monthly_closures` — `auth.uid() IS NOT NULL AND (visibility='privada_'||user_role() OR visibility='compartida')`. Guard `auth.uid() IS NOT NULL` añadido en mig 32. **SELECT de `accounts` es share-aware desde mig 56 (usa `can_see_visibility()`).**
-  - **Grupo D** (función helper): `transactions`, `holdings`, `transaction_splits`, `bank_account_links` — `can_see_account()` o `can_see_transaction()`, ambas con `auth.uid() IS NOT NULL` desde mig 32. **SELECT de `holdings` y `transactions` son share-aware desde mig 56 (usan `can_read_account()`).**
+  - **Grupo D** (función helper): `transactions`, `holdings`, `transaction_splits`, `bank_account_links`, `manual_holdings`, `manual_holdings_history` — `can_see_account()` / `can_see_transaction()` / `can_read_account()`. SELECT share-aware desde mig 56–57; escritura estricta sin cambios.
 - **Principio B2 (compartir = solo lectura, mig 56):** `can_see_visibility()` y `can_read_account()` amplían el acceso de lectura si existe una fila activa en `shares` (scope `private_detail` o `continuity`). Las policies de INSERT/UPDATE/DELETE no se tocan — `can_see_account()` sigue siendo el guard de escritura.
 - **Visibilidad tri-state:** `privada_eric` | `privada_ana` | `compartida`. Aplica a `accounts`, `assets`, `budgets`, `savings_goals`, `liabilities`, `categories` (cuando `is_default=false`), `weekly_closures`, `monthly_closures`.
 - **Tablas públicas (mercado):** `holding_prices`, `currency_rates` — SELECT con `TRUE`, sin restricción de usuario.
-- **Tablas compartidas sin filtro V1:** `stock_options`, `manual_holdings`, `manual_holdings_history`, `maristas_items`, `projects`, `stock_prices` — `auth.role()='authenticated'`.
+- **Tablas compartidas sin filtro V1:** `stock_options`, `maristas_items`, `projects`, `stock_prices` — `auth.role()='authenticated'`.
 - **Vistas:** todas con `security_invoker=true` — heredan RLS del usuario que ejecuta.
 - **INV-6:** RLS sin GRANT de tabla → 42501 silencioso (200 + 0 filas). Ver grants por tabla en §4.
 - **Sin DELETE** en tablas de historial: `transactions`, `budgets`, `weekly_closures`, `monthly_closures`, `incomes`.
@@ -509,7 +509,7 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 
 **Índices:** `idx_manual_holdings_account`.  
 **Trigger:** `trg_manual_holdings_snapshot` AFTER INSERT/UPDATE → inserta en `manual_holdings_history`.  
-**RLS:** `auth.role()='authenticated'`.  
+**RLS:** Grupo D desde mig 57 — SELECT: `can_read_account(account_id)` (share-aware); INSERT/UPDATE/DELETE: `can_see_account(account_id)` (estricto). Reemplaza policy permisiva `manual_holdings_authenticated` (ALL, `auth.role()='authenticated'`).  
 **Uso:** Roboadvisor MyInvestor (P-001).
 
 ---
@@ -526,7 +526,7 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 
 **Constraint:** UNIQUE (manual_holding_id, snapshot_date).  
 **Índices:** `idx_mh_history_holding` on (manual_holding_id, snapshot_date DESC).  
-**RLS:** `auth.role()='authenticated'`.
+**RLS:** Grupo D desde mig 57 — navega `manual_holding_id → manual_holdings.account_id`. SELECT: `can_read_account(account_id)` (share-aware); INSERT/UPDATE/DELETE: `can_see_account(account_id)` (estricto). Reemplaza policy permisiva `mh_history_authenticated` (ALL).
 
 ---
 
@@ -1061,8 +1061,8 @@ Como `v_cuentas_composicion` pero a nivel de **cuenta individual** (`account_id`
 | `holding_prices` | ✓ TRUE | — | — | — | Público |
 | `currency_rates` | ✓ TRUE | — | — | — | Público |
 | `stock_options` | ✓ | ✓ | ✓ | — | V1 compartido |
-| `manual_holdings` | ✓ | ✓ | ✓ | — | |
-| `manual_holdings_history` | ✓ | ✓ | ✓ | — | |
+| `manual_holdings` | ✓ RLS (share-aware) | ✓ RLS | ✓ RLS | ✓ RLS | Grupo D desde mig 57; worker escribe por service_role |
+| `manual_holdings_history` | ✓ RLS (share-aware) | ✓ RLS | ✓ RLS | ✓ RLS | Grupo D desde mig 57; navega a account via manual_holdings |
 | `patrimonio_snapshots` | ✓ RLS | ✓ RLS | ✓ RLS | — | |
 | `bank_connections` | ✓ RLS | ✓ mig 23 | ✓ mig 23 | ✓ mig 24 | Grupo A |
 | `bank_account_links` | ✓ RLS | ✓ mig 23 | ✓ mig 23 | ✓ mig 24 | Grupo D |
@@ -1144,6 +1144,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260612000054 | `v_cuentas_detalle.sql` | mig-54: CREATE VIEW `v_cuentas_detalle` WITH (security_invoker=true) — igual que v_cuentas_composicion pero a nivel de cuenta individual (account_id). Añade name, institution, visibility. Alimenta drill-down U4 de /cuentas. Verificado: SUM = v_cuentas_composicion para todos los titulares. |
 | 20260613000055 | `shares.sql` | B2: tabla `shares` (compartición asimétrica + continuidad pre-armada). RLS: SELECT si participas; INSERT/UPDATE/DELETE solo como grantor. Seed 2 filas continuidad inactivas (eric↔ana). |
 | 20260613000056 | `can_see_visibility.sql` | B2: `can_see_visibility(text)` + `can_read_account(uuid)` share-aware. Repunta SELECT de `accounts`, `holdings`, `transactions`. Escritura (can_see_account) intacta. |
+| 20260613000057 | `rls_manual_holdings.sql` | B2: cierra fuga manual_holdings + _history. De ALL permisivo a Grupo D: SELECT can_read_account; INSERT/UPDATE/DELETE can_see_account. |
 
 ---
 
