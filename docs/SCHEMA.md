@@ -1186,6 +1186,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260613000059 | `fn_supersede_pending_booked.sql` | fn_supersede_pending_booked(): auto-dedupe PENDING(h_)→BOOKED(er_) por content-match. Llamada por sync_psd2.py end-of-run en LIVE. |
 | 20260613000060 | `fn_pending_review_dups.sql` | fn_pending_review_dups(): lista duplicados PSD2 ambiguos para revisión humana. INVOKER, respeta RLS B2. Llamada desde /estado. |
 | 20260628000061 | `weekly_closures_health.sql` | (1) ALTER weekly_closures: ADD data_health (ok/parcial/roto) + health_reason. (2) fn_close_week(date) SECURITY DEFINER: total_spent, total_budget prorrateado (T-037), health gate (pendientes/psd2/dups/budget/actividad), semaforo, top_deviations, UPSERT. GRANT service_role. (3) v_last_closure_health INVOKER + GRANT authenticated. D-020. |
+| 20260628000062 | `revoke_public_security_definer.sql` | P-022: REVOKE EXECUTE FROM PUBLIC en los 3 writers SECURITY DEFINER: fn_close_week(date), capture_patrimonio_snapshot(), fn_supersede_pending_booked(). GRANT service_role en capture y fn_supersede. authenticated conserva capture (mig-21). Helpers can_*/user_role intactos (→T-039). |
 
 ---
 
@@ -1200,4 +1201,5 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 - **P-006 (activo):** NDX1.DE en holding_prices sin holding asociado — necesario para stock_options_valued. Filas "huérfanas" esperadas.
 - **P-008 / D-001:** holding_prices acepta ticker=NULL AND isin=NULL. CHECK constraint pendiente (baja prioridad).
 - **`supabase db dump --linked`** requiere Docker. Para volcado fiel: iniciar Docker y ejecutar `npx supabase db dump --schema public --linked > docs/schema_dump.sql` antes del siguiente release.
+- **P-022 (permanente):** Postgres concede `EXECUTE` a `PUBLIC` por defecto en toda función nueva. PostgREST expone `public` a `anon`. Regla: en cada función `SECURITY DEFINER` nueva, incluir inmediatamente `REVOKE EXECUTE FROM PUBLIC` + `GRANT EXECUTE TO <rol>`. Helpers INVOKER de RLS (can_*, user_role): conservar siempre `authenticated`; endurecer `anon` en T-039. Verificar con `has_function_privilege('anon', oid, 'EXECUTE')` (P-021).
 - **mig-51 (10-jun-2026):** parche de datos exclusivamente (UPDATE/INSERT en `transactions` y `classification_rules`). No altera ninguna definición de tabla, vista, RLS ni GRANT — §2/§3/§4 permanecen válidos. Idempotente (guards `IS DISTINCT FROM`, `WHERE NOT EXISTS`).
