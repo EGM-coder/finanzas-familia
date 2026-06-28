@@ -16,6 +16,17 @@ type DupRow = {
   n: number
 }
 
+type ClosureRow = {
+  scope: string
+  week_start: string
+  week_end: string
+  semaforo: string
+  data_health: string
+  health_reason: string | null
+  closed_at: string
+  recent_bad_count: number
+}
+
 // ── Helpers ──────────────────────────────────────────────────
 
 function fmtAmt(n: number) {
@@ -75,10 +86,19 @@ export default async function EstadoPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: rawDups, error: dupsError } = await supabase.rpc('fn_pending_review_dups')
+  const [dupsResult, closureResult] = await Promise.all([
+    supabase.rpc('fn_pending_review_dups'),
+    supabase.from('v_last_closure_health').select('*'),
+  ])
+
+  const { data: rawDups, error: dupsError } = dupsResult
   if (dupsError) console.error('[estado] fn_pending_review_dups:', dupsError.message)
 
+  const { data: rawClosures, error: closureError } = closureResult
+  if (closureError) console.error('[estado] v_last_closure_health:', closureError.message)
+
   const dups: DupRow[] = (rawDups as DupRow[] | null) ?? []
+  const closures: ClosureRow[] = (rawClosures as ClosureRow[] | null) ?? []
   const dupCount: number | '—' = dupsError ? '—' : dups.length
   const dupColor = dupsError
     ? 'var(--signal-neg)'
@@ -193,6 +213,70 @@ export default async function EstadoPage() {
           {/* Salud live */}
           <div>
             <div className="label" style={{ marginBottom: 12 }}>Salud de datos · live</div>
+
+            {/* Último cierre semanal (D-020) */}
+            {closureError ? (
+              <div className="roman" style={{ fontSize: 12, color: 'var(--signal-neg)', marginBottom: 14 }}>
+                Error cierre semanal: {closureError.message}
+              </div>
+            ) : closures.length === 0 ? (
+              <div className="roman" style={{ fontSize: 12, color: 'var(--ink-4)', marginBottom: 14 }}>
+                Sin cierres semanales aún.
+              </div>
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                <div className="label" style={{ fontSize: 9, marginBottom: 6 }}>Último cierre</div>
+                {closures.map((cl) => {
+                  const isOk = cl.data_health === 'ok'
+                  const semaforoColor = cl.semaforo === 'verde'
+                    ? 'var(--signal-pos)'
+                    : cl.semaforo === 'rojo'
+                      ? 'var(--signal-neg)'
+                      : 'var(--signal-warn)'
+                  const healthColor = cl.data_health === 'roto'
+                    ? 'var(--signal-neg)'
+                    : 'var(--signal-warn)'
+                  const scopeLabel = cl.scope === 'compartida'
+                    ? 'compartida'
+                    : cl.scope.replace('privada_', '')
+                  return (
+                    <div
+                      key={cl.scope}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '68px 1fr auto',
+                        gap: 8,
+                        padding: '6px 0',
+                        borderBottom: '1px solid var(--rule-2)',
+                        alignItems: 'baseline',
+                      }}
+                    >
+                      <span className="roman" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                        {scopeLabel}
+                      </span>
+                      <span style={{ fontSize: 12 }}>
+                        {isOk ? (
+                          <span className="num" style={{ color: semaforoColor }}>{cl.semaforo}</span>
+                        ) : (
+                          <span className="roman" style={{ color: healthColor }}>
+                            {cl.data_health === 'roto' ? 'roto' : 'parcial'}
+                            {cl.health_reason ? ` — ${cl.health_reason}` : ''}
+                          </span>
+                        )}
+                      </span>
+                      {Number(cl.recent_bad_count) > 0 && (
+                        <span className="num" style={{ fontSize: 10, color: 'var(--signal-warn)' }}>
+                          {cl.recent_bad_count}×
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+                <div className="roman" style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 4 }}>
+                  semana {closures[0]?.week_start} – {closures[0]?.week_end}
+                </div>
+              </div>
+            )}
 
             {dupsError ? (
               <div className="roman" style={{ fontSize: 13, color: 'var(--signal-neg)' }}>

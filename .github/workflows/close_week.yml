@@ -1,0 +1,33 @@
+name: close_week
+
+on:
+  schedule:
+    # Lunes 06:00 UTC — semana ISO recién cerrada (lunes–domingo anterior)
+    - cron: '0 6 * * 1'
+  workflow_dispatch:  # trigger manual para testing
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install python-dotenv supabase anthropic
+
+      - name: Run close_week
+        working-directory: egmfin-jobs
+        env:
+          SUPABASE_URL:             ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY:        ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python3 close_week.py

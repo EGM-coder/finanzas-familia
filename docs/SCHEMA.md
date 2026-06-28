@@ -1,6 +1,6 @@
-# EGMFin · SCHEMA.md — Fuente de verdad (10-jun-2026)
+# EGMFin · SCHEMA.md — Fuente de verdad (28-jun-2026)
 
-> **Generado desde:** lectura directa de las 57 migraciones en `supabase/migrations/`  
+> **Generado desde:** lectura directa de las 61 migraciones en `supabase/migrations/`  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible en este entorno.  
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8).  
 > **P-009 (regla permanente):** antes de cualquier query nuevo, verificar columnas reales aquí o con `\d+ tabla`.
@@ -56,6 +56,9 @@
 `plpgsql SECURITY DEFINER` — Auto-resuelve el trap PSD2 PENDING→BOOKED. Busca pares donde una fila `h_*` (PENDING, hash) y una fila `er_*` (BOOKED, entry_reference) comparten `account_id`, `date`, `amount` y `description` (IS NOT DISTINCT FROM). Para cada par marca la fila `h_` como `superseded_by = er_.id`. Usa `DISTINCT ON (h.id)` para garantizar 1 er_ canónica por h_. Devuelve el número de filas neutralizadas. **Llamada por `sync_psd2.py` al final de cada run en modo LIVE** (no en DRY_RUN). Seguridad: solo toca `h_` con gemela `er_` confirmada; nunca fusiona dos `er_` (caso Iberia: mismo importe, misma fecha, dos cargos reales → no hay h_ → no se toca); `h_` huérfanas sin gemela quedan intactas para revisión humana. `GRANT EXECUTE TO authenticated` no es necesario — la llama el worker con `service_role`.
 
 **Doctrina PENDING→BOOKED:** los duplicados `h_`/`er_` se auto-resuelven aquí. Los casos ambiguos (dos `er_` con mismo contenido, `h_` huérfana) se dejan para revisión humana; no existe lógica automática que los fusione.
+
+### `public.fn_close_week(p_week_start date) → void` *(mig 61)*
+`plpgsql SECURITY DEFINER` — Calcula y hace UPSERT del cierre semanal para los 3 scopes (`privada_eric`, `privada_ana`, `compartida`). Por scope: (1) `total_spent` de `v_spent_by_category_week`; (2) `total_budget` prorrateado con `generate_series` (maneja semanas que cruzan meses, T-037); (3) gate de salud — pendientes, psd2_fresco, dups, budget_cobertura, actividad_cero_sospechosa → verdict `data_health` + `health_reason`; (4) semaforo (solo fiable si `data_health='ok'`); (5) `top_deviations` top-3 por abs(spent−budget). Deja `insights='[]'` — lo escribe `close_week.py`. Llama la vista `v_spent_by_category_week` directamente (como DEFINER, el owner tiene acceso total; el scope lo aplica la propia función). El filtro inline de dups replica `fn_pending_review_dups` porque esa fn es INVOKER (no llamarla desde DEFINER). `GRANT EXECUTE TO service_role` únicamente. **D-020.**
 
 ### `public.capture_patrimonio_snapshot() → patrimonio_snapshots`
 `plpgsql SECURITY DEFINER` — Lee vista `patrimonio_neto`, hace UPSERT ON CONFLICT `(snapshot_date)`. `GRANT EXECUTE TO authenticated`.
@@ -604,7 +607,7 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 
 ---
 
-### 2.25 · `public.weekly_closures` *(mig 30)*
+### 2.25 · `public.weekly_closures` *(mig 30 + mig 61)*
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -613,10 +616,12 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 | `week_end` | date NOT NULL | domingo = week_start + 6 |
 | `scope` | text NOT NULL | CHECK: `privada_eric`, `privada_ana`, `compartida` |
 | `total_spent` | numeric(12,2) NOT NULL | |
-| `total_budget` | numeric(12,2) NOT NULL | |
-| `semaforo` | text NOT NULL | CHECK: `verde`, `ambar`, `rojo` |
-| `top_deviations` | jsonb NOT NULL | DEFAULT '[]' |
-| `insights` | jsonb NOT NULL | DEFAULT '[]' |
+| `total_budget` | numeric(12,2) NOT NULL | prorrateo si la semana cruza mes (T-037, mig-61) |
+| `semaforo` | text NOT NULL | CHECK: `verde`, `ambar`, `rojo`. Fiable SOLO si `data_health='ok'` (D-020) |
+| `top_deviations` | jsonb NOT NULL | DEFAULT '[]'. Top 3 categorías por abs(spent−budget prorrateado) |
+| `insights` | jsonb NOT NULL | DEFAULT '[]'. Escrito por `close_week.py` (LLM). Vacío hasta primer cron |
+| `data_health` | text NOT NULL | DEFAULT 'ok'. CHECK: `ok`, `parcial`, `roto` (mig-61) |
+| `health_reason` | text | Causas activas concatenadas con ` · ` (mig-61) |
 | `closed_at` | timestamptz NOT NULL | DEFAULT now() |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
@@ -624,7 +629,8 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 **Constraints:** `weekly_closures_unique_week_scope` UNIQUE (week_start, scope); `weekly_closures_week_end_check` CHECK (week_end = week_start + 6).  
 **Índices:** `weekly_closures_week_start_idx` (week_start DESC), `weekly_closures_scope_week_start_idx` (scope, week_start DESC).  
 **RLS:** Grupo C (mig 32 guard) con `scope` en vez de `visibility`.  
-**GRANTs:** SELECT, INSERT, UPDATE a `authenticated` (mig 30). Sin DELETE.
+**GRANTs:** SELECT, INSERT, UPDATE a `authenticated` (mig 30). Sin DELETE.  
+**D-020:** `data_health` es el gate de verdad. Consumidor (UI, job) lee salud antes que semaforo.
 
 ---
 
@@ -1049,6 +1055,25 @@ Como `v_cuentas_composicion` pero a nivel de **cuenta individual** (`account_id`
 **GRANT:** SELECT a `authenticated`.  
 **Verificado (12-jun-2026):** `SUM(valor) GROUP BY (titular, segmento)` = `v_cuentas_composicion` para todos los titulares, diff = 0.
 
+### 3.X · `public.v_last_closure_health` *(mig 61)*
+
+Por scope visible al usuario: el último cierre semanal en `weekly_closures`.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `scope` | text | `privada_eric`, `privada_ana`, `compartida` |
+| `week_start` | date | lunes ISO del último cierre |
+| `week_end` | date | domingo |
+| `semaforo` | text | `verde`/`ambar`/`rojo`. Solo fiable si `data_health='ok'` |
+| `data_health` | text | `ok`/`parcial`/`roto` |
+| `health_reason` | text | Causas activas (null si ok) |
+| `closed_at` | timestamptz | Momento del último cierre |
+| `recent_bad_count` | bigint | Cierres `parcial`/`roto` en las últimas 12 semanas (84 días) |
+
+**Security_invoker:** true — el SELECT de `weekly_closures` hereda el RLS Grupo C. Eric ve `privada_eric` + `compartida`; Ana ve `privada_ana` + `compartida`.  
+**GRANT:** SELECT a `authenticated`.  
+**D-020:** consumidor gatea por `data_health` antes de renderizar `semaforo`.
+
 ---
 
 ## 4 · GRANTs resumen por tabla
@@ -1160,6 +1185,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260613000058 | `rls_stock_options.sql` | B2 final: añade owner_role (NOT NULL, backfill 'eric'); RLS por operación: SELECT can_see_visibility share-aware, escritura owner-only. stock_options_valued hereda automáticamente. |
 | 20260613000059 | `fn_supersede_pending_booked.sql` | fn_supersede_pending_booked(): auto-dedupe PENDING(h_)→BOOKED(er_) por content-match. Llamada por sync_psd2.py end-of-run en LIVE. |
 | 20260613000060 | `fn_pending_review_dups.sql` | fn_pending_review_dups(): lista duplicados PSD2 ambiguos para revisión humana. INVOKER, respeta RLS B2. Llamada desde /estado. |
+| 20260628000061 | `weekly_closures_health.sql` | (1) ALTER weekly_closures: ADD data_health (ok/parcial/roto) + health_reason. (2) fn_close_week(date) SECURITY DEFINER: total_spent, total_budget prorrateado (T-037), health gate (pendientes/psd2/dups/budget/actividad), semaforo, top_deviations, UPSERT. GRANT service_role. (3) v_last_closure_health INVOKER + GRANT authenticated. D-020. |
 
 ---
 
