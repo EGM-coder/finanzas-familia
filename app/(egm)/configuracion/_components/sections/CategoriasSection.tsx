@@ -133,7 +133,7 @@ export function CategoriasSection({ categories }: Props) {
       color: newForm.color || undefined,
     })
     setSaving(false)
-    if (res?.error) { toast.error('No he podido guardar el cambio.'); return }
+    if (!res?.ok) { toast.error('No he podido guardar el cambio.'); return }
     toast('Guardado.')
     setShowNew(false)
     setNewForm({ name: '', parent_id: '', visibility: 'compartida', color: '' })

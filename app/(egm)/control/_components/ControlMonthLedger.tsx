@@ -7,6 +7,7 @@ import { ReviewBadge } from './ReviewBadge'
 export type EnrichedRow = Row & {
   rootColor: string | null
   por_revisar: boolean
+  account_visibility: string | null
 }
 
 interface Props {

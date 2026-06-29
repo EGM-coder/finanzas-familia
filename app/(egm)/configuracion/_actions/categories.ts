@@ -15,12 +15,15 @@ interface UpdatePayload {
   color?: string | null
 }
 
-export async function createCategory(payload: CreatePayload) {
+export async function createCategory(payload: CreatePayload): Promise<
+  { ok: true; category: { id: string; name: string; parent_id: string | null; color: string | null; is_active: boolean } } |
+  { ok?: never; error: string }
+> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'No autenticado' }
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('categories')
     .insert({
       name: payload.name.trim(),
@@ -30,10 +33,13 @@ export async function createCategory(payload: CreatePayload) {
       is_default: false,
       is_active: true,
     })
+    .select('id, name, parent_id, color, is_active')
+    .single()
 
   if (error) return { error: error.message }
   revalidatePath('/configuracion')
-  return { ok: true }
+  revalidatePath('/control')
+  return { ok: true, category: data as { id: string; name: string; parent_id: string | null; color: string | null; is_active: boolean } }
 }
 
 export async function updateCategory(id: string, payload: UpdatePayload) {

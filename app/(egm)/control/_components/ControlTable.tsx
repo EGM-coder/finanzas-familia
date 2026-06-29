@@ -21,7 +21,7 @@ export interface Row {
   nature: string | null
   titular: string | null
   is_reimbursable: boolean | null
-  accounts: { institution: string; name: string } | null
+  accounts: { institution: string; name: string; visibility: string } | null
   categories: Category | null
   projects: { id: string; name: string } | null
   order_id: string | null

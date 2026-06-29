@@ -54,7 +54,10 @@ export default async function ControlPage({ searchParams }: Props) {
   const view = params.view ?? ''          // '' = carátula (planner); 'apuntes' = ledger
   const natureFilter = params.nature ?? null
   const projectFilter = params.project_id ?? null
-  const ver = params.ver === 'pendientes' ? 'pendientes' : 'todas'
+  const ver: 'todas' | 'pendientes' | 'sin_clasificar' =
+    params.ver === 'pendientes' ? 'pendientes'
+    : params.ver === 'sin_clasificar' ? 'sin_clasificar'
+    : 'todas'
   const isCurrentMonth = mes === currentMes()
 
   if (!/^\d{4}-\d{2}$/.test(mes)) redirect(`/control?mes=${currentMes()}`)
@@ -191,7 +194,7 @@ export default async function ControlPage({ searchParams }: Props) {
       id, date, description, counterparty, raw_concept, amount, currency,
       category_id, project_id, nature, titular, is_reimbursable,
       order_id,
-      accounts(institution, name),
+      accounts(institution, name, visibility),
       categories(id, name, color, parent_id),
       projects(id, name),
       purchase_orders(merchant)
@@ -298,10 +301,13 @@ export default async function ControlPage({ searchParams }: Props) {
       rootColor: root?.color ?? null,
       por_revisar,
       is_direct_charge: directChargeMap.get(row.id) ?? false,
+      account_visibility: (row.accounts as { visibility?: string } | null)?.visibility ?? null,
     } as EnrichedRow
   })
 
   const countPorRevisar = enrichedRows.filter((r) => r.por_revisar).length
+  // Predicado canónico = fn_close_week: category_id IS NULL AND amount<0 AND superseded_by IS NULL
+  const countSinClasificar = enrichedRows.filter((r) => r.category_id === null && r.amount < 0).length
   const gastoMes = computeConsumo(enrichedRows, maristasProjectId)
 
   const natMap = new Map<string | null, number>()
@@ -348,7 +354,9 @@ export default async function ControlPage({ searchParams }: Props) {
     ? ({ fijo_recurrente: 'Fijos', variable_recurrente: 'Variables', extraordinario: 'Extraordinarios', inversion: 'Inversiones' } as Record<string, string>)[natureFilter] ?? natureFilter
     : projectFilter
       ? 'Maristas'
-      : null
+      : ver === 'sin_clasificar'
+        ? 'Sin clasificar'
+        : null
 
   return (
     <div className="max-w-3xl mx-auto px-8 py-12">
@@ -369,17 +377,13 @@ export default async function ControlPage({ searchParams }: Props) {
 
       <MonthSwitcher mes={mes} />
 
-      {/* T-038-diag: quitar tras diagnosticar */}
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--ink-3)', padding: '6px 0', borderBottom: '1px solid var(--rule)', marginBottom: 16 }}>
-        diag · uid: {user.id.slice(0, 8)}… · cats: {categories.length} (roots: {categories.filter(c => c.parent_id === null).length}) · txns: {txnsRes.data?.length ?? 0}
-      </div>
-
       <ControlMonthShell
         rows={enrichedRows}
         categories={categories}
         initialProjects={initialProjects}
         serverAggregates={serverAggregates}
         countPorRevisar={countPorRevisar}
+        countSinClasificar={countSinClasificar}
         initialModo={ver}
         userId={user.id}
         mes={mes}

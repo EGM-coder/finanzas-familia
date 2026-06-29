@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { ControlMonthLedger, type EnrichedRow } from './ControlMonthLedger'
 import { CategorizationDrawer, type DirtySnapshot } from './CategorizationDrawer'
 import { AggregatesPanel, type ServerAggregates } from './AggregatesPanel'
-import { ReviewToggleBar } from './ReviewToggleBar'
+import { ReviewToggleBar, type FilterModo } from './ReviewToggleBar'
 import { type Category } from './CategoryCombobox'
 import { type Project } from './ProjectCombobox'
 
@@ -14,7 +14,8 @@ interface Props {
   initialProjects: Project[]
   serverAggregates: ServerAggregates
   countPorRevisar: number
-  initialModo: 'todas' | 'pendientes'
+  countSinClasificar: number
+  initialModo: FilterModo
   userId: string
   mes: string
   isCurrentMonth: boolean
@@ -26,30 +27,30 @@ export function ControlMonthShell({
   initialProjects,
   serverAggregates,
   countPorRevisar,
+  countSinClasificar,
   initialModo,
   userId,
   mes,
   isCurrentMonth,
 }: Props) {
   const router = useRouter()
-  const [modo, setModo] = useState<'todas' | 'pendientes'>(initialModo)
+  const [modo, setModo] = useState<FilterModo>(initialModo)
   const [selectedTx, setSelectedTx] = useState<EnrichedRow | null>(null)
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set())
   const [pendingDirtySnapshot, setPendingDirtySnapshot] = useState<DirtySnapshot | null>(null)
 
-  // Reset removedIds when data refreshes (router.refresh after categorization save)
   useEffect(() => {
     setRemovedIds(new Set())
   }, [rows])
 
-  // Close drawer cleanly when navigating to a different month
   useEffect(() => {
     setSelectedTx(null)
   }, [mes])
 
-  function handleModoChange(nuevoModo: 'todas' | 'pendientes') {
+  function handleModoChange(nuevoModo: FilterModo) {
     setModo(nuevoModo)
-    router.replace(`/control?mes=${mes}&ver=${nuevoModo}`, { scroll: false })
+    // Preservar view=apuntes para que el deep-link funcione en hard refresh
+    router.replace(`/control?mes=${mes}&view=apuntes&ver=${nuevoModo}`, { scroll: false })
   }
 
   const markRemoved = (id: string) => {
@@ -65,7 +66,11 @@ export function ControlMonthShell({
   }
 
   const rowsVisibles =
-    modo === 'pendientes' ? rows.filter((r) => r.por_revisar) : rows
+    modo === 'pendientes'
+      ? rows.filter((r) => r.por_revisar)
+      : modo === 'sin_clasificar'
+        ? rows.filter((r) => r.category_id === null && r.amount < 0)
+        : rows
 
   return (
     <>
@@ -79,6 +84,7 @@ export function ControlMonthShell({
 
       <ReviewToggleBar
         count={countPorRevisar}
+        countSinClasificar={countSinClasificar}
         modo={modo}
         onChange={handleModoChange}
       />

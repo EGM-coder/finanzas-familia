@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Drawer } from 'vaul'
 import { CategoryCombobox, type Category } from './CategoryCombobox'
+import { createCategory } from '@/app/(egm)/configuracion/_actions/categories'
 import { ProjectCombobox, type Project } from './ProjectCombobox'
 import { toast } from 'sonner'
 import { NatureSelect, type NatureValue } from './NatureSelect'
@@ -30,6 +31,7 @@ type TransactionRow = {
   is_reimbursable: boolean | null
   order_id: string | null
   is_direct_charge: boolean
+  account_visibility?: string | null
 }
 
 export type DirtySnapshot = {
@@ -75,6 +77,10 @@ export function CategorizationDrawer({
 }: Props) {
   const router = useRouter()
   const isOpen = transaction !== null
+  // D-021: copia local de categories para añadir altas inline sin router.refresh
+  const [localCategories, setLocalCategories] = useState<Category[]>(categories)
+  useEffect(() => { setLocalCategories(categories) }, [categories])
+
   const [categoryId, setCategoryId] = useState<string | null>(transaction?.category_id ?? null)
   const [projectId, setProjectId] = useState<string | null>(transaction?.project_id ?? null)
   const [nature, setNature] = useState<NatureValue | null>((transaction?.nature as NatureValue | null) ?? null)
@@ -145,6 +151,12 @@ export function CategorizationDrawer({
   }, [transaction, categoryId, projectId, nature, titular, isReimbursable])
 
   const canSave = categoryId !== null && !isSaving
+
+  // D-021: alta de categoría inline — añade a estado local y autoselecciona
+  const handleCategoryCreated = useCallback((newCat: Category) => {
+    setLocalCategories(prev => [...prev, newCat])
+    setCategoryId(newCat.id)
+  }, [])
 
   // Cierre con dirty-check — Vaul onOpenChange + botón Cancelar
   const handleClose = useCallback(() => {
@@ -448,9 +460,15 @@ export function CategorizationDrawer({
               <FieldLabel>Categoría</FieldLabel>
               <div ref={categoryWrapperRef}>
                 <CategoryCombobox
-                  categories={categories}
+                  categories={localCategories}
                   value={categoryId}
                   onChange={setCategoryId}
+                  enableInlineCreate
+                  defaultVisibility={
+                    (transaction?.account_visibility as 'privada_eric' | 'privada_ana' | 'compartida' | null | undefined) ?? 'compartida'
+                  }
+                  onCreateCategory={createCategory}
+                  onCategoryCreated={handleCategoryCreated}
                 />
               </div>
             </div>
@@ -496,43 +514,36 @@ export function CategorizationDrawer({
               />
             )}
 
-            {/* T-033: cargo directo — solo para raíl (PayPal/Amazon) sin enlace */}
-            {transaction && transaction.order_id === null && (() => {
-              const texts = [transaction.counterparty, transaction.description, transaction.raw_concept]
-                .map(s => s?.toLowerCase() ?? '')
-              const isRail = texts.some(t => t.includes('paypal') || t.includes('amazon'))
-                || transaction.is_direct_charge
-              if (!isRail) return null
-              return (
-                <div style={{ paddingTop: 16, borderTop: '1px solid var(--rule-2)' }}>
-                  <button
-                    type="button"
-                    onClick={handleToggleDirect}
-                    style={{
-                      background: 'none',
-                      border: '1px solid var(--rule)',
-                      padding: '7px 14px',
-                      cursor: 'pointer',
-                      fontFamily: 'var(--sans)',
-                      fontSize: 11,
-                      letterSpacing: '0.06em',
-                      color: isDirectCharge ? 'var(--signal-neg)' : 'var(--ink-3)',
-                      borderRadius: 0,
-                      transition: 'color 150ms ease, border-color 150ms ease',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--ink-3)'; e.currentTarget.style.color = 'var(--ink-1)' }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--rule)'; e.currentTarget.style.color = isDirectCharge ? 'var(--signal-neg)' : 'var(--ink-3)' }}
-                  >
-                    {isDirectCharge ? 'Quitar cargo directo' : 'Marcar como cargo directo'}
-                  </button>
-                  {isDirectCharge && (
-                    <div className="roman" style={{ fontSize: 10, marginTop: 6, color: 'var(--ink-4)' }}>
-                      Cargo de raíl sin pedido asociado — no requiere conciliación.
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
+            {/* D-021: Pago directo — cualquier cargo (amount<0, sin order_id). Secundario. */}
+            {transaction && transaction.amount < 0 && transaction.order_id === null && (
+              <div style={{ paddingTop: 16, borderTop: '1px solid var(--rule-2)' }}>
+                <button
+                  type="button"
+                  onClick={handleToggleDirect}
+                  style={{
+                    background: 'none',
+                    border: '1px solid var(--rule)',
+                    padding: '7px 14px',
+                    cursor: 'pointer',
+                    fontFamily: 'var(--sans)',
+                    fontSize: 11,
+                    letterSpacing: '0.06em',
+                    color: isDirectCharge ? 'var(--signal-neg)' : 'var(--ink-3)',
+                    borderRadius: 0,
+                    transition: 'color 150ms ease, border-color 150ms ease',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--ink-3)'; e.currentTarget.style.color = 'var(--ink-1)' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--rule)'; e.currentTarget.style.color = isDirectCharge ? 'var(--signal-neg)' : 'var(--ink-3)' }}
+                >
+                  {isDirectCharge ? 'Quitar pago directo' : 'Marcar como pago directo'}
+                </button>
+                {isDirectCharge && (
+                  <div className="roman" style={{ fontSize: 10, marginTop: 6, color: 'var(--ink-4)' }}>
+                    Pago directo — no requiere conciliación con pedido.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Footer sticky */}

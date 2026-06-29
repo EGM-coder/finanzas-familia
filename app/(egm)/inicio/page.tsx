@@ -115,11 +115,11 @@ export default async function InicioPage() {
   )?.id ?? null
   const incomeCatIds = [nominaId, dividendosId].filter((id): id is string => id != null)
 
-  // ── Round 2 · flujo del mes ──────────────────────────────────
+  // ── Round 2 · flujo del mes + sin_clasificar ─────────────────
   // ingresos leídos desde transactions (misma fuente que patrimonio_neto),
   // filtrados por hojas Nómina + Dividendos, excluyendo transferencias.
   // incomes no se toca — reservada para módulo fiscal futuro.
-  const [txnsRes, fixedRes] = await Promise.all([
+  const [txnsRes, fixedRes, sinClasRes] = await Promise.all([
     supabase
       .from('transactions')
       .select('amount, nature, project_id, category_id')
@@ -132,6 +132,12 @@ export default async function InicioPage() {
       .select('total_spent')
       .eq('year', year)
       .eq('month', month),
+    supabase
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .is('category_id', null)
+      .lt('amount', 0)
+      .is('superseded_by', null),
   ])
 
   // ── Patrimonio ───────────────────────────────────────────────
@@ -168,6 +174,7 @@ export default async function InicioPage() {
   const ingresosPendiente = ingresosMes === 0
   const consumoMes  = computeConsumo(txns, maristasProjectId)
   const fijosMes    = (fixedRes.data ?? []).reduce((s, r) => s + Number(r.total_spent), 0)
+  const sinClasCount = sinClasRes.count ?? 0
   const margenMes   = ingresosMes - consumoMes
   const medianIncome = medianRes.data?.median_monthly_income
     ? Number(medianRes.data.median_monthly_income) : null
@@ -341,7 +348,16 @@ export default async function InicioPage() {
           </div>
 
           {/* TODO: acceso tenue /estado — ubicación final pendiente decisión Eric */}
-          <div style={{ marginTop: 28, textAlign: 'right' }}>
+          <div style={{ marginTop: 28, textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+            {sinClasCount > 0 && (
+              <Link
+                href="/control?view=apuntes&ver=sin_clasificar"
+                className="roman"
+                style={{ fontSize: 11, color: 'var(--signal-warn)', textDecoration: 'none' }}
+              >
+                {sinClasCount} sin clasificar →
+              </Link>
+            )}
             <Link href="/estado" className="roman" style={{ fontSize: 11, color: 'var(--ink-4)', textDecoration: 'none' }}>
               estado →
             </Link>

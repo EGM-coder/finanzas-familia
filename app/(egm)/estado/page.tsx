@@ -4,6 +4,9 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import tablero from './tablero.json'
 
+// Deep-link URL canónica a la vista "sin clasificar" de /control
+const CONTROL_SIN_CLASIF = '/control?view=apuntes&ver=sin_clasificar'
+
 // ── Types ────────────────────────────────────────────────────
 
 type Entry = { mk?: string; tx: string; nota?: string }
@@ -86,9 +89,15 @@ export default async function EstadoPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [dupsResult, closureResult] = await Promise.all([
+  const [dupsResult, closureResult, sinClasResult] = await Promise.all([
     supabase.rpc('fn_pending_review_dups'),
     supabase.from('v_last_closure_health').select('*'),
+    supabase
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .is('category_id', null)
+      .lt('amount', 0)
+      .is('superseded_by', null),
   ])
 
   const { data: rawDups, error: dupsError } = dupsResult
@@ -105,6 +114,8 @@ export default async function EstadoPage() {
     : typeof dupCount === 'number' && dupCount > 0
       ? 'var(--signal-warn)'
       : 'var(--signal-pos)'
+  const sinClasCount: number = sinClasResult.count ?? 0
+  const sinClasColor = sinClasCount > 0 ? 'var(--signal-warn)' : 'var(--signal-pos)'
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '34px 50px 60px' }}>
@@ -161,18 +172,39 @@ export default async function EstadoPage() {
           </div>
         </div>
 
-        {/* Salud de datos */}
-        <div>
-          <div className="label" style={{ marginBottom: 8 }}>duplicados PSD2 · revisión</div>
-          <div className="num" style={{ fontSize: 48, lineHeight: 1, color: dupColor }}>
-            {dupCount}
+        {/* Salud de datos — duplicados + sin clasificar */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <div className="label" style={{ marginBottom: 8 }}>duplicados PSD2 · revisión</div>
+            <div className="num" style={{ fontSize: 40, lineHeight: 1, color: dupColor }}>
+              {dupCount}
+            </div>
+            <div className="display-it" style={{ fontSize: 12, marginTop: 6, color: 'var(--ink-3)' }}>
+              {dupsError
+                ? 'error al consultar'
+                : dups.length === 0
+                  ? 'sin duplicados · ok'
+                  : `${dups.length} grupo${dups.length > 1 ? 's' : ''} · revisar`}
+            </div>
           </div>
-          <div className="display-it" style={{ fontSize: 12, marginTop: 8, color: 'var(--ink-3)' }}>
-            {dupsError
-              ? 'error al consultar'
-              : dups.length === 0
-                ? 'sin duplicados · ok'
-                : `${dups.length} grupo${dups.length > 1 ? 's' : ''} · revisar`}
+          <div>
+            <div className="label" style={{ marginBottom: 8 }}>sin clasificar · categoría</div>
+            <Link
+              href={CONTROL_SIN_CLASIF}
+              style={{ textDecoration: 'none', display: 'inline-block' }}
+            >
+              <span className="num" style={{ fontSize: 40, lineHeight: 1, color: sinClasColor }}>
+                {sinClasCount}
+              </span>
+            </Link>
+            <div className="display-it" style={{ fontSize: 12, marginTop: 6, color: 'var(--ink-3)' }}>
+              {sinClasCount === 0
+                ? 'todo clasificado · ok'
+                : <Link href={CONTROL_SIN_CLASIF} style={{ color: 'var(--signal-warn)', textDecoration: 'none' }}>
+                    clasificar en control →
+                  </Link>
+              }
+            </div>
           </div>
         </div>
       </div>
