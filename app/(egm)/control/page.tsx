@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { MonthSwitcher } from './_components/MonthSwitcher'
 import { ControlMonthShell } from './_components/ControlMonthShell'
+import { SinClasificarBacklog } from './_components/SinClasificarBacklog'
 import { type EnrichedRow } from './_components/ControlMonthLedger'
 import { type ServerAggregates } from './_components/AggregatesPanel'
 import { PlannerShell } from '../planner/_components/PlannerShell'
@@ -67,6 +68,104 @@ export default async function ControlPage({ searchParams }: Props) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  // ── BACKLOG (view=backlog) — cola de sin_clasificar de meses anteriores ─────
+  if (view === 'backlog') {
+    const [backlogRes, categoriesRes, projectsRes, directChargeBacklogRes] = await Promise.all([
+      supabase
+        .from('transactions')
+        .select(`
+          id, date, description, counterparty, raw_concept, amount, currency,
+          category_id, project_id, nature, titular, is_reimbursable,
+          superseded_by, order_id,
+          accounts(institution, name, visibility),
+          categories(id, name, color, parent_id),
+          projects(id, name),
+          purchase_orders(merchant)
+        `)
+        .is('category_id', null)
+        .lt('amount', 0)
+        .is('superseded_by', null)
+        .lt('date', start)
+        .order('date', { ascending: false })
+        .order('id', { ascending: false }),
+      supabase
+        .from('categories')
+        .select('id, name, parent_id, color, is_active')
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true }),
+      supabase
+        .from('projects')
+        .select('id, name, slug')
+        .eq('status', 'active')
+        .order('name', { ascending: true }),
+      supabase
+        .from('transactions')
+        .select('id, is_direct_charge')
+        .is('category_id', null)
+        .lt('amount', 0)
+        .is('superseded_by', null)
+        .lt('date', start),
+    ])
+
+    if (backlogRes.error) throw new Error(backlogRes.error.message)
+
+    const categories = categoriesRes.data ?? []
+    const catMap = new Map(categories.map((c) => [c.id, c]))
+    const initialProjects = projectsRes.data ?? []
+
+    const directChargeMap = new Map<string, boolean>()
+    if (!directChargeBacklogRes.error && directChargeBacklogRes.data) {
+      for (const r of directChargeBacklogRes.data) {
+        directChargeMap.set(r.id as string, Boolean(r.is_direct_charge))
+      }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const enrichedRows: EnrichedRow[] = (backlogRes.data as any[]).map((row) => {
+      const root = resolveRoot(row.category_id, catMap)
+      const por_revisar =
+        !row.category_id || !row.nature || !row.titular || !row.counterparty || row.counterparty === row.raw_concept
+      return {
+        ...row,
+        rootColor: root?.color ?? null,
+        por_revisar,
+        is_direct_charge: directChargeMap.get(row.id) ?? false,
+        account_visibility: (row.accounts as { visibility?: string } | null)?.visibility ?? null,
+      } as EnrichedRow
+    })
+
+    const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
+    const mesLabel = `${MONTHS_ES[month - 1]} ${year}`
+
+    return (
+      <div className="max-w-3xl mx-auto px-8 py-12">
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 8 }}>
+          <Link
+            href={`/control?mes=${mes}&view=apuntes&ver=sin_clasificar`}
+            style={{ fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--ink-3)', textDecoration: 'none', letterSpacing: '0.06em' }}
+          >
+            ← Sin clasificar
+          </Link>
+          <span className="label" style={{ fontSize: 9, color: 'var(--ink-4)' }}>
+            · Meses anteriores
+          </span>
+        </div>
+
+        <div className="display-it" style={{ fontSize: 24, marginBottom: 32 }}>
+          Antes de {mesLabel}
+        </div>
+
+        <SinClasificarBacklog
+          rows={enrichedRows}
+          categories={categories}
+          projects={initialProjects}
+          mes={mes}
+        />
+      </div>
+    )
+  }
 
   // ── CARÁTULA (vista por defecto) ─────────────────────────
   if (view !== 'apuntes') {
@@ -217,7 +316,7 @@ export default async function ControlPage({ searchParams }: Props) {
     .gte('date', start)
     .lt('date', end)
 
-  const [txnsRes, categoriesRes, projectsRes, superCatRes, directChargeRes, sinClasRes] = await Promise.all([
+  const [txnsRes, categoriesRes, projectsRes, superCatRes, directChargeRes, sinClasRes, sinClasMesRes] = await Promise.all([
     txnQuery,
     supabase
       .from('categories')
@@ -244,6 +343,15 @@ export default async function ControlPage({ searchParams }: Props) {
       .is('category_id', null)
       .lt('amount', 0)
       .is('superseded_by', null),
+    // Predicado canónico mes actual — para calcular countSinClasAnterior
+    supabase
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .is('category_id', null)
+      .lt('amount', 0)
+      .is('superseded_by', null)
+      .gte('date', start)
+      .lt('date', end),
   ])
 
   if (txnsRes.error) throw new Error(txnsRes.error.message)
@@ -316,6 +424,7 @@ export default async function ControlPage({ searchParams }: Props) {
   // Predicado canónico all-time = fn_close_week: category_id IS NULL AND amount<0 AND superseded_by IS NULL
   // Query independiente (no heredada del scope mensual de enrichedRows) → mismo número que /estado e /inicio
   const countSinClasificar = sinClasRes.count ?? 0
+  const countSinClasAnterior = countSinClasificar - (sinClasMesRes.count ?? 0)
   const gastoMes = computeConsumo(enrichedRows, maristasProjectId)
 
   const natMap = new Map<string | null, number>()
@@ -392,6 +501,7 @@ export default async function ControlPage({ searchParams }: Props) {
         serverAggregates={serverAggregates}
         countPorRevisar={countPorRevisar}
         countSinClasificar={countSinClasificar}
+        countSinClasAnterior={countSinClasAnterior}
         initialModo={ver}
         userId={user.id}
         mes={mes}

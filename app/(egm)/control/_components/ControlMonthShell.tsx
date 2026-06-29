@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { ControlMonthLedger, type EnrichedRow } from './ControlMonthLedger'
 import { CategorizationDrawer, type DirtySnapshot } from './CategorizationDrawer'
 import { AggregatesPanel, type ServerAggregates } from './AggregatesPanel'
@@ -15,6 +16,7 @@ interface Props {
   serverAggregates: ServerAggregates
   countPorRevisar: number
   countSinClasificar: number
+  countSinClasAnterior: number
   initialModo: FilterModo
   userId: string
   mes: string
@@ -28,6 +30,7 @@ export function ControlMonthShell({
   serverAggregates,
   countPorRevisar,
   countSinClasificar,
+  countSinClasAnterior,
   initialModo,
   userId,
   mes,
@@ -88,6 +91,23 @@ export function ControlMonthShell({
         modo={modo}
         onChange={handleModoChange}
       />
+
+      {modo === 'sin_clasificar' && countSinClasAnterior > 0 && (
+        <div style={{ paddingBottom: 16 }}>
+          <Link
+            href={`/control?mes=${mes}&view=backlog`}
+            style={{
+              fontFamily: 'var(--sans)',
+              fontSize: 12,
+              color: 'var(--ink-3)',
+              textDecoration: 'none',
+              letterSpacing: '0.04em',
+            }}
+          >
+            {countSinClasAnterior} en meses anteriores →
+          </Link>
+        </div>
+      )}
 
       <ControlMonthLedger
         rows={rowsVisibles}
