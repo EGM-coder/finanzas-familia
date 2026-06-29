@@ -248,30 +248,30 @@ BEGIN
     IF NOT v_psd2_fresco THEN
       v_data_health := 'roto';
       IF v_max_txn_date = '1970-01-01'::date THEN
-        v_health_parts := v_health_parts
-          || 'Sincronización bancaria sin movimientos registrados';
+        v_health_parts := array_append(v_health_parts,
+          'Sincronización bancaria sin movimientos registrados');
       ELSE
-        v_health_parts := v_health_parts
-          || ('Sincronización bancaria sin actualizar desde ' || v_max_txn_date::text);
+        v_health_parts := array_append(v_health_parts,
+          'Sincronización bancaria sin actualizar desde ' || v_max_txn_date::text);
       END IF;
     END IF;
 
     IF v_pendientes > 0 THEN
       IF v_data_health = 'ok' THEN v_data_health := 'parcial'; END IF;
-      v_health_parts := v_health_parts
-        || (v_pendientes::text || ' movimientos sin categorizar');
+      v_health_parts := array_append(v_health_parts,
+        v_pendientes::text || ' movimientos sin categorizar');
     END IF;
 
     IF v_dups > 0 THEN
       IF v_data_health = 'ok' THEN v_data_health := 'parcial'; END IF;
-      v_health_parts := v_health_parts
-        || (v_dups::text || ' grupos de transacciones duplicadas');
+      v_health_parts := array_append(v_health_parts,
+        v_dups::text || ' grupos de transacciones duplicadas');
     END IF;
 
     IF v_cero_sospechoso THEN
       IF v_data_health = 'ok' THEN v_data_health := 'parcial'; END IF;
-      v_health_parts := v_health_parts
-        || 'Sin movimientos esta semana (inferior al histórico)';
+      v_health_parts := array_append(v_health_parts,
+        'Sin movimientos esta semana (inferior al histórico)');
     END IF;
 
     v_health_reason := CASE
