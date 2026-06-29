@@ -24,6 +24,7 @@ export interface Row {
   accounts: { institution: string; name: string; visibility: string } | null
   categories: Category | null
   projects: { id: string; name: string } | null
+  superseded_by: string | null
   order_id: string | null
   purchase_orders: { merchant: string | null } | null
   is_direct_charge: boolean

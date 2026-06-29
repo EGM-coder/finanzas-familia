@@ -69,7 +69,7 @@ export function ControlMonthShell({
     modo === 'pendientes'
       ? rows.filter((r) => r.por_revisar)
       : modo === 'sin_clasificar'
-        ? rows.filter((r) => r.category_id === null && r.amount < 0)
+        ? rows.filter((r) => r.category_id === null && r.amount < 0 && r.superseded_by === null)
         : rows
 
   return (

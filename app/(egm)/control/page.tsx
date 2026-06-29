@@ -193,7 +193,7 @@ export default async function ControlPage({ searchParams }: Props) {
     .select(`
       id, date, description, counterparty, raw_concept, amount, currency,
       category_id, project_id, nature, titular, is_reimbursable,
-      order_id,
+      superseded_by, order_id,
       accounts(institution, name, visibility),
       categories(id, name, color, parent_id),
       projects(id, name),
@@ -217,7 +217,7 @@ export default async function ControlPage({ searchParams }: Props) {
     .gte('date', start)
     .lt('date', end)
 
-  const [txnsRes, categoriesRes, projectsRes, superCatRes, directChargeRes] = await Promise.all([
+  const [txnsRes, categoriesRes, projectsRes, superCatRes, directChargeRes, sinClasRes] = await Promise.all([
     txnQuery,
     supabase
       .from('categories')
@@ -237,6 +237,13 @@ export default async function ControlPage({ searchParams }: Props) {
       .eq('is_default', true)
       .single(),
     directChargeQuery,
+    // Predicado canónico all-time — idéntico a fn_close_week y /estado y /inicio
+    supabase
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .is('category_id', null)
+      .lt('amount', 0)
+      .is('superseded_by', null),
   ])
 
   if (txnsRes.error) throw new Error(txnsRes.error.message)
@@ -306,8 +313,9 @@ export default async function ControlPage({ searchParams }: Props) {
   })
 
   const countPorRevisar = enrichedRows.filter((r) => r.por_revisar).length
-  // Predicado canónico = fn_close_week: category_id IS NULL AND amount<0 AND superseded_by IS NULL
-  const countSinClasificar = enrichedRows.filter((r) => r.category_id === null && r.amount < 0).length
+  // Predicado canónico all-time = fn_close_week: category_id IS NULL AND amount<0 AND superseded_by IS NULL
+  // Query independiente (no heredada del scope mensual de enrichedRows) → mismo número que /estado e /inicio
+  const countSinClasificar = sinClasRes.count ?? 0
   const gastoMes = computeConsumo(enrichedRows, maristasProjectId)
 
   const natMap = new Map<string | null, number>()
