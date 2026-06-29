@@ -23,7 +23,7 @@ type ClosureRow = {
   scope: string
   week_start: string
   week_end: string
-  semaforo: string
+  semaforo: string | null   // NULL = histórico insuficiente (< 4 semanas). D-022.
   data_health: string
   health_reason: string | null
   closed_at: string
@@ -288,7 +288,13 @@ export default async function EstadoPage() {
                       </span>
                       <span style={{ fontSize: 12 }}>
                         {isOk ? (
-                          <span className="num" style={{ color: semaforoColor }}>{cl.semaforo}</span>
+                          cl.semaforo ? (
+                            <span className="num" style={{ color: semaforoColor }}>{cl.semaforo}</span>
+                          ) : (
+                            <span className="roman" style={{ color: 'var(--ink-4)' }}>
+                              Aún sin histórico suficiente
+                            </span>
+                          )
                         ) : (
                           <span className="roman" style={{ color: healthColor }}>
                             {cl.data_health === 'roto' ? 'roto' : 'parcial'}

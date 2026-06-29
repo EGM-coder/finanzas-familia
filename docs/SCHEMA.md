@@ -57,8 +57,8 @@
 
 **Doctrina PENDING→BOOKED:** los duplicados `h_`/`er_` se auto-resuelven aquí. Los casos ambiguos (dos `er_` con mismo contenido, `h_` huérfana) se dejan para revisión humana; no existe lógica automática que los fusione.
 
-### `public.fn_close_week(p_week_start date) → void` *(mig 61)*
-`plpgsql SECURITY DEFINER` — Calcula y hace UPSERT del cierre semanal para los 3 scopes (`privada_eric`, `privada_ana`, `compartida`). Por scope: (1) `total_spent` de `v_spent_by_category_week`; (2) `total_budget` prorrateado con `generate_series` (maneja semanas que cruzan meses, T-037); (3) gate de salud — pendientes, psd2_fresco, dups, budget_cobertura, actividad_cero_sospechosa → verdict `data_health` + `health_reason`; (4) semaforo (solo fiable si `data_health='ok'`); (5) `top_deviations` top-3 por abs(spent−budget). Deja `insights='[]'` — lo escribe `close_week.py`. Llama la vista `v_spent_by_category_week` directamente (como DEFINER, el owner tiene acceso total; el scope lo aplica la propia función). El filtro inline de dups replica `fn_pending_review_dups` porque esa fn es INVOKER (no llamarla desde DEFINER). `GRANT EXECUTE TO service_role` únicamente. **D-020.**
+### `public.fn_close_week(p_week_start date) → void` *(mig 61 + reescrita mig 63)*
+`plpgsql SECURITY DEFINER` — Calcula y hace UPSERT del cierre semanal para los 3 scopes (`privada_eric`, `privada_ana`, `compartida`). Por scope: (1) `total_spent` de `v_spent_by_category_week`; (2) `baseline_weeks` = semanas distintas con dato en las últimas 8 (p_week_start−56d, p_week_start); (3) `total_habitual` = suma de medianas (percentile_cont 0.5) de las 8 semanas previas para las categorías presentes esta semana; (4) `semaforo` = NULL si baseline < 4 semanas (histórico insuficiente, estado temprano legítimo), else verde/ambar/rojo según ratio total_spent/total_habitual (≤1.00/≤1.25/>1.25); (5) `top_deviations` top-3 por (spent−habitual) DESC con delta>0 — campos: category_id, category_name, spent, habitual, delta; (6) gate de salud — pendientes, sincronización bancaria, dups, actividad_cero_sospechosa (sin budget_cobertura — D-022) → `data_health` + `health_reason` (texto parafraseado, sin palabras prohibidas §4.5); (7) `total_budget = NULL` (presupuesto diferido, T-037 DORMIDA); UPSERT preserva `insights` si ya existía. Llama la vista `v_spent_by_category_week` como DEFINER (owner tiene acceso total; el scope lo aplica la propia función). Dups inline (replica fn_pending_review_dups que es INVOKER). `GRANT EXECUTE TO service_role` únicamente. **D-020, D-022.**
 
 ### `public.capture_patrimonio_snapshot() → patrimonio_snapshots`
 `plpgsql SECURITY DEFINER` — Lee vista `patrimonio_neto`, hace UPSERT ON CONFLICT `(snapshot_date)`. `GRANT EXECUTE TO authenticated`.
@@ -607,7 +607,7 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 
 ---
 
-### 2.25 · `public.weekly_closures` *(mig 30 + mig 61)*
+### 2.25 · `public.weekly_closures` *(mig 30 + mig 61 + mig 63)*
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -616,12 +616,12 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 | `week_end` | date NOT NULL | domingo = week_start + 6 |
 | `scope` | text NOT NULL | CHECK: `privada_eric`, `privada_ana`, `compartida` |
 | `total_spent` | numeric(12,2) NOT NULL | |
-| `total_budget` | numeric(12,2) NOT NULL | prorrateo si la semana cruza mes (T-037, mig-61) |
-| `semaforo` | text NOT NULL | CHECK: `verde`, `ambar`, `rojo`. Fiable SOLO si `data_health='ok'` (D-020) |
-| `top_deviations` | jsonb NOT NULL | DEFAULT '[]'. Top 3 categorías por abs(spent−budget prorrateado) |
-| `insights` | jsonb NOT NULL | DEFAULT '[]'. Escrito por `close_week.py` (LLM). Vacío hasta primer cron |
+| `total_budget` | numeric(12,2) | NULL — presupuesto diferido a módulo VIII, FY siguiente (D-022, T-037 DORMIDA) |
+| `semaforo` | text | NULL = histórico insuficiente (< 4 semanas). CHECK: `verde`, `ambar`, `rojo`. Fiable SOLO si `data_health='ok'` (D-020, D-022) |
+| `top_deviations` | jsonb NOT NULL | DEFAULT '[]'. Top 3 por (spent−habitual) DESC con delta>0. Campos: category_id, category_name, spent, habitual, delta (mig-63) |
+| `insights` | jsonb NOT NULL | DEFAULT '[]'. Escrito por `close_week.py` (LLM o templado). Vacío hasta primer cron |
 | `data_health` | text NOT NULL | DEFAULT 'ok'. CHECK: `ok`, `parcial`, `roto` (mig-61) |
-| `health_reason` | text | Causas activas concatenadas con ` · ` (mig-61) |
+| `health_reason` | text | Causas activas concatenadas con ` · `. Texto parafraseado §4.5 (mig-63) |
 | `closed_at` | timestamptz NOT NULL | DEFAULT now() |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
@@ -630,7 +630,8 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 **Índices:** `weekly_closures_week_start_idx` (week_start DESC), `weekly_closures_scope_week_start_idx` (scope, week_start DESC).  
 **RLS:** Grupo C (mig 32 guard) con `scope` en vez de `visibility`.  
 **GRANTs:** SELECT, INSERT, UPDATE a `authenticated` (mig 30). Sin DELETE.  
-**D-020:** `data_health` es el gate de verdad. Consumidor (UI, job) lee salud antes que semaforo.
+**D-020:** `data_health` es el gate de verdad. Consumidor (UI, job) lee salud antes que semaforo.  
+**D-022:** `semaforo=NULL` es estado temprano legítimo (< 4 semanas de histórico), no error. `total_budget` siempre NULL hasta FY siguiente.
 
 ---
 
@@ -1187,6 +1188,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260613000060 | `fn_pending_review_dups.sql` | fn_pending_review_dups(): lista duplicados PSD2 ambiguos para revisión humana. INVOKER, respeta RLS B2. Llamada desde /estado. |
 | 20260628000061 | `weekly_closures_health.sql` | (1) ALTER weekly_closures: ADD data_health (ok/parcial/roto) + health_reason. (2) fn_close_week(date) SECURITY DEFINER: total_spent, total_budget prorrateado (T-037), health gate (pendientes/psd2/dups/budget/actividad), semaforo, top_deviations, UPSERT. GRANT service_role. (3) v_last_closure_health INVOKER + GRANT authenticated. D-020. |
 | 20260628000062 | `revoke_public_security_definer.sql` | P-022: REVOKE EXECUTE FROM PUBLIC en los 3 writers SECURITY DEFINER: fn_close_week(date), capture_patrimonio_snapshot(), fn_supersede_pending_booked(). GRANT service_role en capture y fn_supersede. authenticated conserva capture (mig-21). Helpers can_*/user_role intactos (→T-039). |
+| 20260629000063 | `fn_close_week_vs_habitual.sql` | D-022: reescritura fn_close_week — semáforo vs habitual (mediana 8 semanas por categoría). ALTER TABLE DROP NOT NULL en semaforo y total_budget. total_budget=NULL (presupuesto diferido, T-037 DORMIDA). semaforo=NULL si baseline < 4 semanas. top_deviations ahora contiene spent/habitual/delta (no budget). Gate de salud sin budget_cobertura. health_reason parafraseado §4.5. Re-verifica REVOKE FROM PUBLIC + GRANT service_role (P-022). |
 
 ---
 
