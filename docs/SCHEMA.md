@@ -135,11 +135,13 @@
 | `start_date` | date | |
 | `end_date` | date | |
 | `total_budget` | numeric(12,2) | |
+| `kind` | text NOT NULL | DEFAULT `'general'`; CHECK: `general`, `viaje`. Clasificación informativa. D-023 |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
 **Proyectos activos:** rutina, maristas_adquisicion, maristas_equipamiento, capital-leo (mig 26), capital-biel (mig 26).  
-**RLS:** `auth.uid() IS NOT NULL`.
+**RLS:** `auth.uid() IS NOT NULL`.  
+**D-023:** `kind` clasifica el proyecto (general/viaje) pero la exclusión de `v_spent_by_category_*` aplica a **todo** `project_id` sin distinción de `kind`.
 
 ---
 
@@ -913,7 +915,7 @@ Todas las columnas de `holdings` más:
 
 ---
 
-### 3.7 · `public.v_spent_by_category_month` *(mig 29 + T-019 mig 20260530000029)*
+### 3.7 · `public.v_spent_by_category_month` *(mig 29 + T-019 mig 20260530000029 + D-023 mig-64)*
 
 **Columnas:** `year` int, `month` int, `category_id` uuid, `visibility` text, `spent` numeric(12,2), `txn_count` int.
 
@@ -921,16 +923,18 @@ Todas las columnas de `holdings` más:
 - Branch A (con splits): suma `ABS(splits.amount)` donde amount < 0
 - Branch B (sin splits): suma `ABS(txn.amount)` donde category_id IS NOT NULL AND amount < 0
 - **Filtro T-019:** `(t.nature IS NULL OR t.nature NOT IN ('transferencia', 'inversion'))` en ambos branches — excluye transferencia e inversión, **preserva NULL** (pendientes de clasificación).
+- **Filtro D-023:** `AND t.project_id IS NULL` en ambos branches — gasto de proyecto fuera del basis de categoría (vive en el sobre del proyecto, no como gasto de categoría).
+- **Filtro T-036:** `AND t.superseded_by IS NULL` — excluye duplicados PSD2 neutralizados.
 
 **Security_invoker:** true.
 
 ---
 
-### 3.8 · `public.v_spent_by_category_week` *(mig 29)*
+### 3.8 · `public.v_spent_by_category_week` *(mig 29 + D-023 mig-64)*
 
 **Columnas:** `week_start` date, `category_id` uuid, `visibility` text, `spent` numeric(12,2), `txn_count` int.
 
-**Filtro:** Mismo que `v_spent_by_category_month`. Agrupa por `date_trunc('week', date)` (lunes ISO).  
+**Filtro:** Mismo que `v_spent_by_category_month` (nature, superseded_by, **project_id IS NULL D-023**). Agrupa por `date_trunc('week', date)` (lunes ISO). Basis del semáforo vs-habitual en `fn_close_week` (D-022).  
 **Security_invoker:** true.
 
 ---
@@ -1189,6 +1193,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260628000061 | `weekly_closures_health.sql` | (1) ALTER weekly_closures: ADD data_health (ok/parcial/roto) + health_reason. (2) fn_close_week(date) SECURITY DEFINER: total_spent, total_budget prorrateado (T-037), health gate (pendientes/psd2/dups/budget/actividad), semaforo, top_deviations, UPSERT. GRANT service_role. (3) v_last_closure_health INVOKER + GRANT authenticated. D-020. |
 | 20260628000062 | `revoke_public_security_definer.sql` | P-022: REVOKE EXECUTE FROM PUBLIC en los 3 writers SECURITY DEFINER: fn_close_week(date), capture_patrimonio_snapshot(), fn_supersede_pending_booked(). GRANT service_role en capture y fn_supersede. authenticated conserva capture (mig-21). Helpers can_*/user_role intactos (→T-039). |
 | 20260629000063 | `fn_close_week_vs_habitual.sql` | D-022: reescritura fn_close_week — semáforo vs habitual (mediana 8 semanas por categoría). ALTER TABLE DROP NOT NULL en semaforo y total_budget. total_budget=NULL (presupuesto diferido, T-037 DORMIDA). semaforo=NULL si baseline < 4 semanas. top_deviations ahora contiene spent/habitual/delta (no budget). Gate de salud sin budget_cobertura. health_reason parafraseado §4.5. Fix: array_append() en v_health_parts (evita ERROR 22P02 que causaba `|| 'literal'` con tipo unknown). Re-verifica REVOKE FROM PUBLIC + GRANT service_role (P-022). |
+| 20260629000064 | `project_kind_view_exclusion.sql` | D-023: (1) projects.kind text NOT NULL DEFAULT 'general' CHECK (general, viaje) — clasificación informativa del proyecto. (2) v_spent_by_category_week: añade `AND t.project_id IS NULL` en ambas ramas (splits + directa). (3) v_spent_by_category_month: ídem. El gasto con project_id vive en el sobre del proyecto, no como gasto de categoría; cambia sustractivo, no rompe shape de ningún consumidor (fn_close_week, v_category_budget_status, v_median_spend_3m_by_category). |
 
 ---
 
