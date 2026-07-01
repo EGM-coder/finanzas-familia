@@ -39,6 +39,10 @@ SUPABASE_URL         = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
 ANTHROPIC_API_KEY    = os.environ.get('ANTHROPIC_API_KEY')
 
+# Interruptor fraseo IA: default false (arranque seguro; no gasta tokens en semanas parciales).
+# Encender: poner la variable de repo FRASEO_IA_ACTIVO=true en Settings > Actions > Variables.
+FRASEO_IA_ACTIVO = os.environ.get('FRASEO_IA_ACTIVO', 'false').strip().lower() in ('true', '1', 'yes')
+
 MODEL = 'claude-haiku-4-5-20251001'
 
 SYSTEM_PROMPT = (
@@ -144,15 +148,18 @@ def main() -> None:
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         logger.error('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY no configurados')
         sys.exit(1)
-    if not ANTHROPIC_API_KEY:
+    if FRASEO_IA_ACTIVO and not ANTHROPIC_API_KEY:
         logger.error(
             'ANTHROPIC_API_KEY no configurado — '
-            'añadir secret en GitHub Actions antes del primer run del cron'
+            'añadir secret en GitHub Actions antes de activar FRASEO_IA_ACTIVO'
         )
         sys.exit(1)
 
+    if not FRASEO_IA_ACTIVO:
+        logger.info('Fraseo IA pausado (FRASEO_IA_ACTIVO=false) — solo cierre determinista.')
+
     sb   = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-    anth = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    anth = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if FRASEO_IA_ACTIVO else None
 
     week = target_monday()
     logger.info(f'Cerrando semana {week} – {week + timedelta(days=6)}')
@@ -208,6 +215,14 @@ def main() -> None:
             health_reason = row.get('health_reason') or health
             insights = [{'type': 'health', 'reason': health_reason}]
             logger.info(f'    → degradado ({health}): {health_reason}')
+
+        elif not FRASEO_IA_ACTIVO:
+            # Fraseo IA pausado — cierre determinista escrito, no se llama a Anthropic.
+            insights = []
+            logger.info(
+                '    → Fraseo IA pausado (FRASEO_IA_ACTIVO=false), '
+                'cierre determinista aplicado.'
+            )
 
         else:
             # data_health='ok' AND semaforo NOT NULL AND total_spent>0 → llamar Claude.

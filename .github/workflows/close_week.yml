@@ -30,4 +30,9 @@ jobs:
           SUPABASE_URL:             ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           ANTHROPIC_API_KEY:        ${{ secrets.ANTHROPIC_API_KEY }}
+          # Encender fraseo IA = poner la variable de repo FRASEO_IA_ACTIVO a true en
+          # Settings > Secrets and variables > Actions > Variables (pestaña "Variables").
+          # Default false: el cierre determinista corre siempre; no se gastan tokens en
+          # semanas parciales. Cambiar sin tocar código ni secrets.
+          FRASEO_IA_ACTIVO:         ${{ vars.FRASEO_IA_ACTIVO }}
         run: python3 close_week.py
