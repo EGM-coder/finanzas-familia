@@ -934,8 +934,18 @@ Todas las columnas de `holdings` más:
 
 **Columnas:** `week_start` date, `category_id` uuid, `visibility` text, `spent` numeric(12,2), `txn_count` int.
 
-**Filtro:** Mismo que `v_spent_by_category_month` (nature, superseded_by, **project_id IS NULL D-023**). Agrupa por `date_trunc('week', date)` (lunes ISO). Basis del semáforo vs-habitual en `fn_close_week` (D-022).  
+**Filtro:** Mismo que `v_spent_by_category_month` (nature, superseded_by, **project_id IS NULL D-023**). Agrupa por `date_trunc('week', date)` (lunes ISO). Refleja **todo el gasto real** — fuente de `total_spent` en `weekly_closures`. El semáforo ya NO la usa directamente (D-024).  
 **Security_invoker:** true.
+
+---
+
+### 3.8b · `public.v_discretionary_spend_by_category_week` *(mig-65 D-024)*
+
+**Columnas:** `week_start` date, `category_id` uuid, `visibility` text, `spent` numeric(12,2), `txn_count` int.
+
+**Filtro D-024:** Igual que `v_spent_by_category_week` **más** `AND t.nature IS DISTINCT FROM 'fijo_recurrente'`. NULL se incluye (pendiente de clasificar = discrecional por defecto). `extraordinario` se incluye. `fijo_recurrente` excluido del basis del semáforo — es un compromiso, no una desviación.  
+**Consumers:** `fn_close_week` para `baseline_weeks`, `total_habitual`, `disc_spent_for_ratio`, `semaforo`, `top_deviations`. El INNER JOIN en ratio y top_deviations excluye automáticamente categorías sin histórico de 8 semanas.  
+**Security_invoker:** true. `GRANT SELECT TO authenticated`.
 
 ---
 
@@ -1194,6 +1204,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260628000062 | `revoke_public_security_definer.sql` | P-022: REVOKE EXECUTE FROM PUBLIC en los 3 writers SECURITY DEFINER: fn_close_week(date), capture_patrimonio_snapshot(), fn_supersede_pending_booked(). GRANT service_role en capture y fn_supersede. authenticated conserva capture (mig-21). Helpers can_*/user_role intactos (→T-039). |
 | 20260629000063 | `fn_close_week_vs_habitual.sql` | D-022: reescritura fn_close_week — semáforo vs habitual (mediana 8 semanas por categoría). ALTER TABLE DROP NOT NULL en semaforo y total_budget. total_budget=NULL (presupuesto diferido, T-037 DORMIDA). semaforo=NULL si baseline < 4 semanas. top_deviations ahora contiene spent/habitual/delta (no budget). Gate de salud sin budget_cobertura. health_reason parafraseado §4.5. Fix: array_append() en v_health_parts (evita ERROR 22P02 que causaba `|| 'literal'` con tipo unknown). Re-verifica REVOKE FROM PUBLIC + GRANT service_role (P-022). |
 | 20260629000064 | `project_kind_view_exclusion.sql` | D-023: (1) projects.kind text NOT NULL DEFAULT 'general' CHECK (general, viaje) — clasificación informativa del proyecto. (2) v_spent_by_category_week: añade `AND t.project_id IS NULL` en ambas ramas (splits + directa). (3) v_spent_by_category_month: ídem. El gasto con project_id vive en el sobre del proyecto, no como gasto de categoría; cambia sustractivo, no rompe shape de ningún consumidor (fn_close_week, v_category_budget_status, v_median_spend_3m_by_category). |
+| 20260701000065 | `fn_close_week_discrecional.sql` | D-024: (1) Nueva vista v_discretionary_spend_by_category_week = v_spent_by_category_week + AND t.nature IS DISTINCT FROM 'fijo_recurrente'. GRANT SELECT authenticated. (2) fn_close_week: total_spent sigue v_spent_by_category_week (gasto real); semaforo/total_habitual/top_deviations pasan a v_discretionary_spend_by_category_week. INNER JOIN en ratio y top_deviations → cats sin histórico discrecional excluidas del juicio. v_disc_spent_for_ratio = spent discrecional solo de cats con habitual. P-022 re-verificado (REVOKE + GRANT service_role). |
 
 ---
 
