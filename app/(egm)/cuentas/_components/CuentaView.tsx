@@ -1,13 +1,14 @@
 'use client'
 import { useState } from 'react'
-import type { DetalleRow, HoldingRow, ManualHoldingRow, TxRow } from '../page'
+import type { DebitCardInfo, DetalleRow, HoldingRow, ManualHoldingRow, TxRow } from '../page'
 
 type Props = {
-  accountId:       string
-  detalleRows:     DetalleRow[]
-  holdings:        HoldingRow[]
-  manualHoldings:  ManualHoldingRow[]
-  txnsByAccount:   Record<string, TxRow[]>
+  accountId:        string
+  detalleRows:      DetalleRow[]
+  holdings:         HoldingRow[]
+  manualHoldings:   ManualHoldingRow[]
+  txnsByAccount:    Record<string, TxRow[]>
+  debitCards:       DebitCardInfo[]
   onSelectPosition: (holdingId: string, positionName: string) => void
 }
 
@@ -142,7 +143,11 @@ function MovementRow({ t, idx }: { t: TxRow; idx: number }) {
 
 // ── Main component ────────────────────────────────────────────────
 
-export function CuentaView({ accountId, detalleRows, holdings, manualHoldings, txnsByAccount, onSelectPosition }: Props) {
+const TITULAR_LABEL: Record<string, string> = {
+  eric: 'Eric', ana: 'Ana', comun: 'Familia', leo: 'Leo', biel: 'Biel',
+}
+
+export function CuentaView({ accountId, detalleRows, holdings, manualHoldings, txnsByAccount, debitCards, onSelectPosition }: Props) {
   const [posExpanded,  setPosExpanded]  = useState(false)
   const [txnShowAll,   setTxnShowAll]   = useState(false)
 
@@ -240,6 +245,45 @@ export function CuentaView({ accountId, detalleRows, holdings, manualHoldings, t
     )
   }
 
+  // ── "Medios de pago" — tarjetas débito vinculadas (D-025) ──────
+  const thisMonth = new Date().toISOString().slice(0, 7)
+  const debitCardsSection = debitCards.length > 0 ? (
+    <div style={{ marginBottom: 20 }}>
+      <div className="label" style={{ fontSize: 9, marginBottom: 8 }}>Medios de pago</div>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {debitCards.map((card, i) => {
+          const monthSpend = (txnsByAccount[card.id] ?? [])
+            .filter(t => t.date.startsWith(thisMonth) && t.amount < 0)
+            .reduce((s, t) => s + Math.abs(t.amount), 0)
+          return (
+            <div
+              key={card.id}
+              style={{
+                display:             'grid',
+                gridTemplateColumns: '1fr auto',
+                alignItems:          'center',
+                gap:                 12,
+                padding:             '9px 8px',
+                borderTop:           i > 0 ? '1px solid var(--rule-2)' : undefined,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{card.name}</div>
+                <div className="roman" style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+                  {TITULAR_LABEL[card.titular] ?? card.titular} · débito
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="num" style={{ fontSize: 13 }}>{fmt(monthSpend)} €</div>
+                <div className="roman" style={{ fontSize: 11, color: 'var(--ink-4)' }}>este mes</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  ) : null
+
   // ── MODO: movimientos (cuenta de efectivo) ─────────────────────
   if (txns.length > 0) {
     const shownTxns = txnShowAll ? txns : txns.slice(0, INITIAL_LIMIT)
@@ -248,6 +292,7 @@ export function CuentaView({ accountId, detalleRows, holdings, manualHoldings, t
     return (
       <div className="fade">
         {header}
+        {debitCardsSection}
         <div className="label" style={{ fontSize: 9, marginBottom: 8 }}>Movimientos</div>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {shownTxns.map((t, i) => (
@@ -271,6 +316,7 @@ export function CuentaView({ accountId, detalleRows, holdings, manualHoldings, t
   return (
     <div className="fade">
       {header}
+      {debitCardsSection}
       <div className="roman" style={{ fontSize: 13, color: 'var(--ink-4)' }}>
         Sin movimientos
       </div>

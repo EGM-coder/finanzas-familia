@@ -1,7 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
 import type {
-  ComposicionRow, DetalleRow, HoldingRow, ManualHoldingRow, PricePoint, StockOptionRow, TxRow,
+  ComposicionRow, DebitCardInfo, DetalleRow, HoldingRow, ManualHoldingRow, PricePoint, StockOptionRow, TxRow,
 } from '../page'
 import { AsesorPanel }      from './AsesorPanel'
 import { ComposicionPanel } from './ComposicionPanel'
@@ -13,16 +13,17 @@ import { SegmentoView }     from './SegmentoView'
 // ── Types ─────────────────────────────────────────────────────────
 
 type Props = {
-  rows:            ComposicionRow[]
-  totalByTitular:  Record<string, number>
-  totalTodo:       number
-  stockOptions:    StockOptionRow[]
-  holdings:        HoldingRow[]
-  detalleRows:     DetalleRow[]
-  pricesByTicker:  Record<string, PricePoint[]>
-  pricesByIsin:    Record<string, PricePoint[]>
-  manualHoldings:  ManualHoldingRow[]
-  txnsByAccount:   Record<string, TxRow[]>
+  rows:                ComposicionRow[]
+  totalByTitular:      Record<string, number>
+  totalTodo:           number
+  stockOptions:        StockOptionRow[]
+  holdings:            HoldingRow[]
+  detalleRows:         DetalleRow[]
+  pricesByTicker:      Record<string, PricePoint[]>
+  pricesByIsin:        Record<string, PricePoint[]>
+  manualHoldings:      ManualHoldingRow[]
+  txnsByAccount:       Record<string, TxRow[]>
+  debitCardsByParent:  Record<string, DebitCardInfo[]>
 }
 
 type NavFrame =
@@ -54,7 +55,7 @@ export function CuentasClient({
   rows, totalByTitular, totalTodo,
   stockOptions, holdings,
   detalleRows, pricesByTicker, pricesByIsin, manualHoldings,
-  txnsByAccount,
+  txnsByAccount, debitCardsByParent,
 }: Props) {
   const titulares = TITULAR_ORDER.filter(t => totalByTitular[t] != null)
   const [active, setActive]     = useState<string>('todo')
@@ -174,6 +175,7 @@ export function CuentasClient({
           holdings={holdings}
           manualHoldings={manualHoldings}
           txnsByAccount={txnsByAccount}
+          debitCards={debitCardsByParent[frame.accountId] ?? []}
           onSelectPosition={(holdingId, positionName) =>
             push({ view: 'posicion', holdingId, positionName, accountId: frame.accountId })
           }

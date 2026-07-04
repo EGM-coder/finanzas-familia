@@ -67,6 +67,12 @@ export type TxRow = {
   category_id:  string | null
 }
 
+export type DebitCardInfo = {
+  id:      string
+  name:    string
+  titular: string
+}
+
 const CASH_TYPES = ['bank', 'cash', 'tesoreria_tae'] as const
 
 export default async function CuentasPage() {
@@ -94,7 +100,7 @@ export default async function CuentasPage() {
         .eq('is_active', true),
       supabase
         .from('accounts')
-        .select('id, titular, type')   // type needed to identify cash accounts
+        .select('id, titular, type, linked_account_id, card_mode, name')
         .eq('is_active', true),
       supabase
         .from('v_cuentas_detalle')
@@ -124,14 +130,34 @@ export default async function CuentasPage() {
     .filter(a => CASH_TYPES.includes(a.type as typeof CASH_TYPES[number]))
     .map(a => a.id as string)
 
-  // ── Round 2: transactions (sequential — needs cashAccountIds) ──
+  // Debit card IDs: need their txns to compute gasto del mes in the drill-down
+  const debitCardIds = accountsData
+    .filter(a => a.type === 'card' && a.card_mode === 'debit')
+    .map(a => a.id as string)
+
+  // Map parent IBAN → linked debit cards (for CuentaView "Medios de pago" section)
+  const debitCardsByParent: Record<string, DebitCardInfo[]> = {}
+  for (const a of accountsData) {
+    if (a.type === 'card' && a.card_mode === 'debit' && a.linked_account_id) {
+      const parentId = a.linked_account_id as string
+      if (!debitCardsByParent[parentId]) debitCardsByParent[parentId] = []
+      debitCardsByParent[parentId].push({
+        id:      a.id      as string,
+        name:    a.name    as string,
+        titular: a.titular as string,
+      })
+    }
+  }
+
+  // ── Round 2: transactions (sequential — needs account IDs) ────
+  const txnAccountIds = [...cashAccountIds, ...debitCardIds]
   const txnsByAccount: Record<string, TxRow[]> = {}
-  if (cashAccountIds.length > 0) {
+  if (txnAccountIds.length > 0) {
     const txnsRes = await supabase
       .from('transactions')
       .select('account_id, date, description, counterparty, amount, nature, category_id')
       .is('superseded_by', null)
-      .in('account_id', cashAccountIds)
+      .in('account_id', txnAccountIds)
       .gte('date', hundredTwentyAgo)
       .order('date', { ascending: false })
 
@@ -244,6 +270,7 @@ export default async function CuentasPage() {
       pricesByIsin={pricesByIsin}
       manualHoldings={manualHoldings}
       txnsByAccount={txnsByAccount}
+      debitCardsByParent={debitCardsByParent}
     />
   )
 }
