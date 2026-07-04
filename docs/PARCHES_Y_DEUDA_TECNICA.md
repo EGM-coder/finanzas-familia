@@ -306,6 +306,27 @@ Deploy estuvo en ERROR con trabajo sin pushear. "Working tree clean" de Claude C
 
 ---
 
+## P-023 · 04-jul-2026 · **PERMANENTE**
+**fn_supersede_pending_booked: normalizar descripción antes de emparejar PENDING→BOOKED**
+
+Los bancos mutan la descripción entre el evento PENDING (h_) y el BOOKED (er_):
+- Santander añade ":" al concepto: `CONCEPTO Alquiler` → `CONCEPTO: Alquiler`
+- Kutxabank duplica el concepto: `OP.NET COMUN` → `OP.NET COMUN  OP.NET COMUN`
+
+La v1 exigía `description IS NOT DISTINCT FROM` → los pares no casaban → −2.025,66 € de gasto duplicado visible (5 pares, verificado 04-jul-2026).
+
+**Regla:** antes de comparar descripciones en cualquier deduper PSD2, aplicar:
+`norm(x) = trim(regexp_replace(lower(replace(x, ':', '')), '\s+', ' ', 'g'))`
+Emparejar por: `norm(e)=norm(h)` OR `norm(h) ⊂ norm(e)` OR `norm(e) ⊂ norm(h)`.
+Emparejamiento 1:1 estricto mediante `ROW_NUMBER` por ambos lados del par.
+
+Adicionalmente: heredar la decisión humana (category_id, project_id, nature, is_reimbursable)
+del h_ al er_ si el campo er_ es NULL — preserva la clasificación hecha en PENDING.
+
+Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre PENDING y BOOKED).
+
+---
+
 ## P-022 · 28-jun-2026 · **PERMANENTE**
 **SECURITY DEFINER + GRANT TO role no basta — REVOKE FROM PUBLIC en cada función SECURITY DEFINER nueva**
 
@@ -357,6 +378,7 @@ Resuelto en mig-62 para los 3 writers. T-039 pendiente para los 6 helpers.
 | T-034 | **RESUELTA** (04-jun-2026). Tres fixes en un solo commit de código: (1) Bug "error al desenlazar" — mig-37 habilitó RLS en purchase_order_charges sin crear policy DELETE; mig-42 añadió GRANT DELETE pero sin policy el RLS deny-by-default bloqueaba → mig-44 añade `pol_charges_delete USING can_see_transaction(transaction_id)`. (2) T-032 (drawer deslizable + rechazar enlace): `rejectMatch` action (DELETE charge ai_proposed + match_status='sin_linkar'); botón Rechazar en footer del PedidoDrawer junto a Confirmar; Handle Vaul visible; CSS en egm.css: `touch-action: none` en handle, `pan-y` en drawer right, `pointer-events: auto` en overlay, `transform: none` en .egm (evita romper position:fixed de portales). (3) Rail detection: unificada a la misma lógica que T-031 (counterparty OR description OR raw_concept contiene 'paypal'/'amazon'); el cargo de Iberia pagado con PayPal detecta como raíl desde el campo description/raw_concept → PV-3 visible en Control y toggle "marcar directo" accesible en CategorizationDrawer sin necesitar un pedido. | — |
 | T-033 | **RESUELTA** (04-jun-2026). Cargo directo de raíl: `transactions.is_direct_charge boolean NOT NULL DEFAULT false` (mig-43). PV-3 en Control pasa a tres estados solo para cargos de raíl (PayPal/Amazon, order_id no nulo, o is_direct_charge=true): ● vinculado (order_id), — directo (is_direct_charge), ○ sin vincular. Toggle en CategorizationDrawer: "Marcar como cargo directo" / "Quitar cargo directo", solo visible si order_id IS NULL y es raíl; actualización optimista + router.refresh. searchCandidates filtra is_direct_charge=false (cargos directos no se ofrecen para enlazar). Doctrina: los cargos de raíl pueden marcarse a mano como directos; el sistema nunca lo infiere. GRANT UPDATE en transactions ya existía (mig 22). Archivos: mig-43, toggleDirectCharge.ts, CategorizationDrawer.tsx, ControlTable.tsx, ControlMonthLedger.tsx, control/page.tsx, pedidos.ts. | — |
 | T-036 | **RESUELTA** (04-jun-2026). Neutralización reversible de duplicados h_/er_: columna `transactions.superseded_by uuid NULL FK self` (mig-45); vistas `v_spent_by_category_month`, `v_spent_by_category_week`, `v_fixed_expenses_observed` filtran `superseded_by IS NULL` (mig-46); queries directas del frontend (inicio, planner, control, searchCandidates) añaden `.is('superseded_by', null)`; 5 filas h_ marcadas via service role con sus gemelas er_ canónicas. Lección documentada en P-019. Sin DELETE, sin pérdida de datos. | — |
+| T-040 | **PENDIENTE.** `fn_supersede_pending_booked` exige `date` idéntica entre h_ y er_. Si el banco mueve la fecha valor entre PENDING y BOOKED (p.ej. cargo viernes → liquidado lunes), el par no casará y el gasto seguirá duplicado. Solución futura: ampliar la condición de fecha a `ABS(e.date - h.date) <= 3` (o similar) con filtro adicional para evitar falsos positivos en misma cuenta/importe cercanos. Registrada en P-023 como limitación conocida. Baja urgencia mientras no se observe en producción. | Baja |
 | T-039 | **PENDIENTE.** Endurecer `anon` en los 6 helpers de RLS: `user_role()`, `can_see_account(uuid)`, `can_see_transaction(uuid)`, `can_see_order(uuid)`, `can_read_account(<sig>)`, `can_see_visibility(<sig>)`. Patrón: `REVOKE EXECUTE FROM PUBLIC; GRANT EXECUTE TO authenticated, service_role;` — nunca quitar `authenticated` o las policies RLS dejan de evaluarse. Hacer con migración propia, no en caliente. Baja urgencia: estos helpers no escriben datos (INVOKER), pero reducen superficie de ataque. Ver P-022. | Baja |
 | T-037 | **DORMIDA** (mig-61, 28-jun-2026 / D-022, mig-63, 29-jun-2026). Prorrateo mensual→semanal implementado en mig-61 (`generate_series` por tramo), pero D-022 sustituye el semáforo vs-budget por vs-habitual en `fn_close_week` (mig-63). La lógica de prorrateo NO se borra — la usará el módulo de Presupuesto (módulo VIII) cuando se active el próximo FY. Hasta entonces `total_budget` queda NULL en `weekly_closures`. | — |
 | T-035 | **RESUELTA** (04-jun-2026). Control roto tras T-033: mig-43 (`is_direct_charge`) commiteada en git pero nunca aplicada a la DB real → `column transactions.is_direct_charge does not exist` (42703) → `control/page.tsx` hacía `throw new Error()` al llegar al `view=apuntes` path. Fix: `is_direct_charge` extraído del SELECT principal; sub-query resiliente separada `directChargeQuery` (solo `id, is_direct_charge`); si la sub-query falla (columna inexistente), `directChargeMap` queda vacío y todos los cargos degradan a `false`. Merge via `directChargeMap.get(row.id) ?? false` en `enrichedRows`. La vista carátula (planner) nunca se vio afectada. Features T-034 (PV-3 tres estados, toggle "marcar directo", rail detection) intactas. Sin DDL. Archivos: `control/page.tsx`. | — |
