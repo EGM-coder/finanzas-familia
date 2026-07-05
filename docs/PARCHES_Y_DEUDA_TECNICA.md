@@ -344,6 +344,17 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
+## P-026 · 05-jul-2026 · **PERMANENTE**
+**Ninguna operación destructiva sin solicitud explícita — proponer y esperar aprobación**
+
+Regla de colaboración: operaciones `DELETE`, `TRUNCATE`, `DROP`, purgas masivas de datos o cualquier acción irreversible sobre la BD o el repositorio solo se ejecutan cuando el prompt las solicita de forma explícita. Si el asistente detecta que una operación destructiva parece necesaria o conveniente, la propone en texto y espera confirmación antes de ejecutarla.
+
+**Por qué:** durante el fix de P-025 se ejecutó un `DELETE` de entradas fin-de-semana en holding_prices sin que el prompt lo pidiera. La purga borró el histórico EU, dejando MC con 1 sola fila. El histórico fue reconstruible vía backfill, pero el incidente consumió tiempo y requirió trabajo extra.
+
+**Cómo aplicar:** ante cualquier duda sobre si una acción es destructiva, aplicar la regla. El coste de esperar una confirmación es bajo; el coste de borrar datos legítimos es alto. Incluye: borrado de filas o tablas, `git reset --hard`, `git push --force`, eliminación de ficheros de código o migrations, purgas en bucle o batch.
+
+---
+
 ## P-025 · 05-jul-2026 · **PERMANENTE**
 **Un job que degrada en silencio no es un job — exit code refleja completitud**
 
