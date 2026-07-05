@@ -226,6 +226,12 @@ def load_active_rules() -> list:
     """
     Fase 1 v10: carga reglas de classification_rules activas, ordered by priority asc.
     Una sola llamada al inicio del run; las reglas se mantienen en memoria.
+
+    P-024 (05-jul-2026): set_account_id debe apuntar a una subcuenta SOLO si esa
+    subcuenta tiene un feed PSD2 granular propio (entrada activa en bank_account_links).
+    Las liquidaciones agregadas (TARJ.CRDTO, LIQUIDACION TARJETA…) pertenecen al IBAN
+    donde el banco las registra. La regla d03dbac0 que desviaba TARJ.CRDTO al account
+    'Tarjeta Kutxabank Eric' fue desactivada en mig-68 por no cumplir esta condición.
     """
     response = sb.table('classification_rules').select('*') \
         .eq('is_active', True).order('priority').execute()

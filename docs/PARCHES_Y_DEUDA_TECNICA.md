@@ -327,6 +327,23 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
+## P-024 · 05-jul-2026 · **PERMANENTE**
+**No desviar a subcuenta de tarjeta lo que no tiene feed granular — el agregado pertenece a la cuenta donde ocurre**
+
+`classification_rules` con `set_account_id` puede enrutar transacciones a una subcuenta de tarjeta. Esto es correcto SOLO si esa tarjeta tiene un feed PSD2 propio con movimientos línea a línea. Si el banco expone únicamente el IBAN (una sola cuenta CACC), los cargos de liquidación agregada (`TARJ.CRDTO …`) son movimientos del IBAN, no de la subcuenta.
+
+**Lo ocurrido:** rule#d03dbac0 (priority 30, `starts_with 'TARJ.CRDTO 4921'`, `set_account_id → Tarjeta Kutxabank Eric`) desviaba el cargo mensual de liquidación a la subcuenta de crédito. El consentimiento PSD2 de Kutxabank expone solo el IBAN. Resultado: 5 liquidaciones (mar–jul 2026, −5.734,93 €) estaban mal enrutadas → IBAN inflado 5.734,93 €; subcuenta con "deuda" artificial de 4.880,55 € (P-002 sobre initial_balance 854,38 sin base real).
+
+**Fix (mig-68, 05-jul-2026):**
+1. `classification_rules` rule#d03dbac0 → `is_active = false`.
+2. 5 txns `TARJ.CRDTO` movidas de Tarjeta Kutxabank Eric → Kutxabank IBAN (conservando `category_id`, `nature` y toda decisión existente). Idempotente por `WHERE account_id = card_id`.
+3. Tarjeta Kutxabank Eric → `initial_balance = 0`, `is_active = false`.
+4. Kutxabank = 6.927,10 € (verificado post-fix = saldo banco real).
+
+**Regla permanente:** antes de crear una regla con `set_account_id` apuntando a una subcuenta de tarjeta, verificar en `raw_session`/`bank_account_links` que exista un feed activo para esa tarjeta. Las liquidaciones agregadas (`TARJ.CRDTO`, `LIQUIDACION TARJETA`…) siempre van al IBAN.
+
+---
+
 ## P-022 · 28-jun-2026 · **PERMANENTE**
 **SECURITY DEFINER + GRANT TO role no basta — REVOKE FROM PUBLIC en cada función SECURITY DEFINER nueva**
 

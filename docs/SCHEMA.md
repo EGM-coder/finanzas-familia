@@ -93,7 +93,7 @@
 **Constraints:** `accounts_card_linked_check` — (type='card' AND linked_account_id IS NOT NULL) OR (type≠'card' AND linked_account_id IS NULL). `accounts_titular_check` — titular IN ('eric','ana','comun','leo','biel') (mig 52). `accounts_card_mode_values` — card_mode IN ('credit','debit') (mig-67). `accounts_card_mode_required` — (type='card' AND card_mode IS NOT NULL) OR (type≠'card' AND card_mode IS NULL) (mig-67).  
 **Índices:** `accounts_linked_idx` on (linked_account_id).  
 **RLS:** Grupo C (mig 32 guard).  
-**D-025:** Tarjetas débito actuales: 'Tarjeta Santander Ana', 'Tarjeta Santander Eric'. Tarjetas crédito: 'Tarjeta Kutxabank Eric', 'Tarjeta BBVA Ana'.
+**D-025:** Tarjetas débito actuales: 'Tarjeta Santander Ana', 'Tarjeta Santander Eric'. Tarjetas crédito activas: 'Tarjeta BBVA Ana'. **'Tarjeta Kutxabank Eric': `is_active=false` (mig-68)** — no tiene feed PSD2 granular; sus liquidaciones viven en el IBAN (P-024).
 
 ---
 
@@ -222,7 +222,8 @@
 | `updated_at` | timestamptz NOT NULL | |
 
 **RLS:** `auth.uid() IS NOT NULL`.  
-**GRANTs (mig 23 Fase 3):** `authenticated` tiene SELECT, INSERT, UPDATE, DELETE.
+**GRANTs (mig 23 Fase 3):** `authenticated` tiene SELECT, INSERT, UPDATE, DELETE.  
+**P-024 (alerta `set_account_id`):** `set_account_id` solo debe enrutar a una subcuenta de tarjeta si esa tarjeta tiene un feed PSD2 granular propio. Los cargos de liquidación agregada (ej. `TARJ.CRDTO`) no son movimientos propios de la subcuenta — pertenecen al IBAN donde ocurren. Ver P-024.
 
 ---
 
@@ -1206,6 +1207,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260613000059 | `fn_supersede_pending_booked.sql` | fn_supersede_pending_booked(): auto-dedupe PENDING(h_)→BOOKED(er_) por content-match. Llamada por sync_psd2.py end-of-run en LIVE. |
 | 20260704000066 | `fn_supersede_pending_booked_v2.sql` | P-023: reescritura con descripción normalizada. norm(x)=trim(regexp_replace(lower(replace(x,':','')),'\s+',' ','g')). Empareja por igualdad o contención de subcadena (cubre ":" Santander + duplicación Kutxabank). 1:1 vía ROW_NUMBER ambos lados. Hereda category_id/project_id/nature/is_reimbursable de h_ a er_ si NULL. Backfill 04-jul: 5 pares neutralizados, −2.025,66 € deduplicados. T-040: limitación date idéntica. |
 | 20260704000067 | `accounts_card_mode_debit.sql` | D-025: accounts.card_mode ('credit'\|'debit') + constraints de coherencia. Backfill: Tarjeta Santander Ana/Eric → debit; resto → credit. account_balances_full: card+debit=0; card+credit=P-002 intacto; bank/cash=initial_balance+propios_activos+tarjetas_débito_activas. Verificación: Santander común = 4.322,81 € (04-jul-2026). |
+| 20260705000068 | `fix_tarj_crdto_kutxabank.sql` | P-024 data fix: desactiva rule#d03dbac0 (TARJ.CRDTO→card subaccount); mueve 5 liquidaciones TARJ.CRDTO a Kutxabank IBAN; Tarjeta Kutxabank Eric → initial_balance=0, is_active=false. Kutxabank = 6.927,10 € verificado. |
 | 20260613000060 | `fn_pending_review_dups.sql` | fn_pending_review_dups(): lista duplicados PSD2 ambiguos para revisión humana. INVOKER, respeta RLS B2. Llamada desde /estado. |
 | 20260628000061 | `weekly_closures_health.sql` | (1) ALTER weekly_closures: ADD data_health (ok/parcial/roto) + health_reason. (2) fn_close_week(date) SECURITY DEFINER: total_spent, total_budget prorrateado (T-037), health gate (pendientes/psd2/dups/budget/actividad), semaforo, top_deviations, UPSERT. GRANT service_role. (3) v_last_closure_health INVOKER + GRANT authenticated. D-020. |
 | 20260628000062 | `revoke_public_security_definer.sql` | P-022: REVOKE EXECUTE FROM PUBLIC en los 3 writers SECURITY DEFINER: fn_close_week(date), capture_patrimonio_snapshot(), fn_supersede_pending_booked(). GRANT service_role en capture y fn_supersede. authenticated conserva capture (mig-21). Helpers can_*/user_role intactos (→T-039). |
