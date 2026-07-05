@@ -163,7 +163,7 @@
 | `nature` | text | CHECK: `fijo_recurrente`, `variable_recurrente`, `extraordinario`, `inversion`, `ahorro`, `transferencia` (mig 24) |
 | `paid_by_user_id` | uuid FK auth.users(id) | ON DELETE RESTRICT |
 | `titular` | text NOT NULL | CHECK: `eric`, `ana`, `compartido` |
-| `source` | text NOT NULL | DEFAULT 'manual'; CHECK: `manual`, `csv`, `psd2`, `gmail_parse`, `outlook_parse` (mig 39) |
+| `source` | text NOT NULL | DEFAULT 'manual'; CHECK: `manual`, `csv`, `psd2`, `gmail_parse`, `outlook_parse`, `backfill_extracto` (mig-70). **D-027:** `backfill_extracto` computa solo saldo; excluido de todas las vistas de gasto (source='psd2' obligatorio). |
 | `source_id` | text | |
 | `counterparty` | text | |
 | `is_reimbursable` | bool NOT NULL | mig 07; DEFAULT false |
@@ -173,6 +173,8 @@
 | `order_id` | uuid FK purchase_orders(id) | mig 38; ON DELETE SET NULL |
 | `is_direct_charge` | bool NOT NULL | mig 43; DEFAULT false; cargo de raíl sin pedido (decisión humana explícita) |
 | `superseded_by` | uuid FK transactions(id) NULL | mig 45; ON DELETE SET NULL; NULL=activa, uuid=duplicado de esa fila (excluida de vistas/sumas); reversible |
+| `dup_reviewed_at` | timestamptz NULL | mig-70; **D-028**: fecha de revisión humana de duplicado conocido. NULL=pendiente; IS NOT NULL=legitimado. fn_pending_review_dups() excluye grupos donde TODAS las filas tienen este campo NOT NULL. |
+| `dup_review_note` | text NULL | mig-70; **D-028**: nota de justificación del revisor (quién + fecha + motivo). |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
@@ -963,6 +965,7 @@ Todas las columnas de `holdings` más:
 - **Filtro T-019:** `(t.nature IS NULL OR t.nature NOT IN ('transferencia', 'inversion'))` en ambos branches — excluye transferencia e inversión, **preserva NULL** (pendientes de clasificación).
 - **Filtro D-023:** `AND t.project_id IS NULL` en ambos branches — gasto de proyecto fuera del basis de categoría (vive en el sobre del proyecto, no como gasto de categoría).
 - **Filtro T-036:** `AND t.superseded_by IS NULL` — excluye duplicados PSD2 neutralizados.
+- **Filtro D-027 (mig-70):** `AND t.source = 'psd2'` — excluye `backfill_extracto`, `manual`, `csv` y cualquier fuente no-PSD2. **INTENCIONAL**: el backfill de extractos pre-PSD2 computa solo saldo, no baseline de hábitos. Cero-impacto en datos históricos (todos los registros vigentes en 2026-07-05 eran source='psd2').
 
 **Security_invoker:** true.
 
@@ -972,7 +975,7 @@ Todas las columnas de `holdings` más:
 
 **Columnas:** `week_start` date, `category_id` uuid, `visibility` text, `spent` numeric(12,2), `txn_count` int.
 
-**Filtro:** Mismo que `v_spent_by_category_month` (nature, superseded_by, **project_id IS NULL D-023**). Agrupa por `date_trunc('week', date)` (lunes ISO). Refleja **todo el gasto real** — fuente de `total_spent` en `weekly_closures`. El semáforo ya NO la usa directamente (D-024).  
+**Filtro:** Mismo que `v_spent_by_category_month` (nature, superseded_by, project_id IS NULL D-023, **source='psd2' D-027**). Agrupa por `date_trunc('week', date)` (lunes ISO). Refleja el gasto real PSD2 — fuente de `total_spent` en `weekly_closures`. El semáforo ya NO la usa directamente (D-024).  
 **Security_invoker:** true.
 
 ---
@@ -981,7 +984,7 @@ Todas las columnas de `holdings` más:
 
 **Columnas:** `week_start` date, `category_id` uuid, `visibility` text, `spent` numeric(12,2), `txn_count` int.
 
-**Filtro D-024:** Igual que `v_spent_by_category_week` **más** `AND t.nature IS DISTINCT FROM 'fijo_recurrente'`. NULL se incluye (pendiente de clasificar = discrecional por defecto). `extraordinario` se incluye. `fijo_recurrente` excluido del basis del semáforo — es un compromiso, no una desviación.  
+**Filtro D-024+D-027:** Igual que `v_spent_by_category_week` (incluyendo `source='psd2'`) **más** `AND t.nature IS DISTINCT FROM 'fijo_recurrente'`. NULL se incluye (pendiente de clasificar = discrecional por defecto). `extraordinario` se incluye. `fijo_recurrente` excluido del basis del semáforo — es un compromiso, no una desviación.  
 **Consumers:** `fn_close_week` para `baseline_weeks`, `total_habitual`, `disc_spent_for_ratio`, `semaforo`, `top_deviations`. El INNER JOIN en ratio y top_deviations excluye automáticamente categorías sin histórico de 8 semanas.  
 **Security_invoker:** true. `GRANT SELECT TO authenticated`.
 
@@ -1249,6 +1252,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260629000064 | `project_kind_view_exclusion.sql` | D-023: (1) projects.kind text NOT NULL DEFAULT 'general' CHECK (general, viaje) — clasificación informativa del proyecto. (2) v_spent_by_category_week: añade `AND t.project_id IS NULL` en ambas ramas (splits + directa). (3) v_spent_by_category_month: ídem. El gasto con project_id vive en el sobre del proyecto, no como gasto de categoría; cambia sustractivo, no rompe shape de ningún consumidor (fn_close_week, v_category_budget_status, v_median_spend_3m_by_category). |
 | 20260701000065 | `fn_close_week_discrecional.sql` | D-024: (1) Nueva vista v_discretionary_spend_by_category_week = v_spent_by_category_week + AND t.nature IS DISTINCT FROM 'fijo_recurrente'. GRANT SELECT authenticated. (2) fn_close_week: total_spent sigue v_spent_by_category_week (gasto real); semaforo/total_habitual/top_deviations pasan a v_discretionary_spend_by_category_week. INNER JOIN en ratio y top_deviations → cats sin histórico discrecional excluidas del juicio. v_disc_spent_for_ratio = spent discrecional solo de cats con habitual. P-022 re-verificado (REVOKE + GRANT service_role). |
 | 20260705000069 | `observability_job_runs_balance_checks.sql` | D-026: `job_runs` (pulso de job: job_name, status ok/error/partial, detail jsonb) + `balance_checks` (ancla de saldo real por cuenta PSD2: account_id, check_date, real_balance). RLS + GRANT SELECT authenticated en ambas (INV-6). Escritura solo service_role (BYPASSRLS). Índice (job_name, run_at DESC) en job_runs. |
+| 20260705000070 | `reconciliacion_backfill_deuda_tecnica.sql` | D-027+D-028: (1) Extiende transactions.source CHECK con 'backfill_extracto'. (2) ADD COLUMN dup_reviewed_at timestamptz + dup_review_note text en transactions. (3) Vistas de gasto (v_spent_by_category_week/month + v_discretionary) añaden AND source='psd2' — exclusión intencional de backfill en analytics. (4) fn_pending_review_dups + fn_close_week inline dup check: excluye grupos totalmente revisados. (5) Marca 9 filas de 3 grupos históricos como revisados. (6) Backfill 22 txns pre-PSD2 (14 Santander + 8 Kutxabank), source=backfill_extracto. (7) Re-ancla initial_balance (Santander 803.77→1047.35, Kutxabank 2151.66→31703.54). (8) Liabilities datos reales (Préstamo coche 26549.29/388.93, Préstamo máster 3010.55/237.72). (9) Holdings ISIN BRK.B+NVDA NULL→reales. (10) DELETE holding_prices huérfanas (BRK.B/NVDA isin=NULL). |
 
 ---
 
