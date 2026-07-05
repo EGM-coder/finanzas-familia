@@ -14,9 +14,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: |
-          cd egmfin-jobs
-          pip install yfinance supabase python-dotenv
+        run: pip install -r egmfin-jobs/requirements.txt
       - name: Run update_prices
         working-directory: egmfin-jobs
         env:

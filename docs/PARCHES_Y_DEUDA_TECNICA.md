@@ -344,6 +344,27 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
+## P-025 · 05-jul-2026 · **PERMANENTE**
+**Un job que degrada en silencio no es un job — exit code refleja completitud**
+
+`update_prices.py` llevaba desde el 29-jun sin actualizar los tickers EU (MC.PA, RMS.PA, RACE.MI, REP.MC, VHYL.AS, NDX1.DE). Dos bugs independientes:
+
+1. **yfinance sin versión fijada:** el workflow hacía `pip install yfinance` sin pin. La versión 1.4.x (publicada ~29-jun) rompió silenciosamente la descarga de exchanges europeos devolviendo DataFrame vacío. El script imprimía "sin datos" para cada ticker EU y terminaba con **exit 0** → Actions lo marcaba verde.
+
+2. **Fecha estampada = TODAY en vez de la fecha real del cierre:** `upsert_holding_price` usaba `date.today().isoformat()` para la columna `date`. Los fines de semana (sin mercado abierto) el script almacenaba precios con fecha sábado/domingo en lugar de la fecha del último cierre real. Esto generó ~160 entradas fantasma de tipo "mismo precio, fecha incorrecta" desde mayo de 2026.
+
+**Fix (05-jul-2026):**
+- `requirements.txt` creado con `yfinance>=1.5.1` (versión que volvió a funcionar con EU).
+- `update_prices.yml`: `pip install -r egmfin-jobs/requirements.txt` en lugar de `pip install yfinance supabase python-dotenv`.
+- `fetch_price` / `fetch_eur_rate` ahora devuelven `price_date = hist.index[-1].date().isoformat()` (fecha real del cierre del índice yfinance).
+- `upsert_holding_price` recibe `price_date` como parámetro; el DELETE+INSERT usa esa fecha.
+- `main()` acumula tickers fallidos y llama `sys.exit(1)` si `failed` no está vacío → Actions marca el run en rojo.
+- 160 entradas fantasma (fecha = fin de semana, BTC e IE0032620787 excluidos) purgadas de la BD.
+
+**Regla:** todo job de ingestión debe: (a) fijar versiones de dependencias externas en `requirements.txt`; (b) propagar el error como exit code 1, nunca silenciarlo; (c) usar la fecha real del dato, no la fecha de ejecución del proceso.
+
+---
+
 ## P-022 · 28-jun-2026 · **PERMANENTE**
 **SECURITY DEFINER + GRANT TO role no basta — REVOKE FROM PUBLIC en cada función SECURITY DEFINER nueva**
 

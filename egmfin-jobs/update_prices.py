@@ -11,6 +11,9 @@ Fixes vs v anterior:
   · P-010 (05-may-2026): get_unique_holdings incluye stock_options.
     NDX1.DE añadido a TICKER_MAP. Lógica equivalente al commit 5f36e9b
     perdido en incidente Copilot.
+  · P-025 (05-jul-2026): fecha de cierre real del índice en vez de TODAY.
+    Exit code 1 si algún ticker esperado queda sin precio (fallo ruidoso).
+    requirements.txt con yfinance>=1.5.1 para evitar regresión de 1.4.x.
 
 Lectura de tickers desde holdings (is_active=TRUE) + stock_options (todos).
 Escribe holding_prices y currency_rates con source='yahoo'.
@@ -34,7 +37,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     sys.exit(1)
 
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
-TODAY = date.today().isoformat()
+TODAY = date.today().isoformat()  # solo para el header de log
 
 TICKER_MAP = {
     "MC":    "MC.PA",
@@ -99,65 +102,72 @@ def get_unique_holdings():
     return out
 
 
-def fetch_eur_rate(currency):
+def fetch_eur_rate(currency) -> tuple:
+    """Returns (rate: Decimal, rate_date: str | None).
+    EUR → (1.0, None) sin escritura en BD.
+    Otras → upsert en currency_rates con la fecha real del último cierre.
+    """
     if currency == "EUR":
-        return Decimal("1.0")
+        return Decimal("1.0"), None
     pair = f"{currency}EUR=X"
     try:
         t = yf.Ticker(pair)
-        info = t.history(period="5d")
-        if info.empty:
-            return None
-        rate = Decimal(str(info["Close"].iloc[-1]))
-        # currency_rates SÍ tiene UNIQUE plano sobre (date, from_currency, to_currency)
+        hist = t.history(period="5d")
+        if hist.empty:
+            return None, None
+        rate = Decimal(str(hist["Close"].iloc[-1]))
+        rate_date = hist.index[-1].date().isoformat()
         sb.table("currency_rates").upsert({
-            "date": TODAY,
+            "date": rate_date,
             "from_currency": currency,
             "to_currency": "EUR",
             "rate": float(rate),
             "source": "yahoo",
         }, on_conflict="date,from_currency,to_currency").execute()
-        return rate
+        return rate, rate_date
     except Exception as e:
         print(f"  Error tipo cambio {currency}: {e}")
-        return None
+        return None, None
 
 
-def fetch_price(ticker, isin, currency):
+def fetch_price(ticker, isin, currency) -> tuple:
+    """Returns (close_orig, close_eur, price_date, error).
+    price_date es la fecha real del último cierre (del índice del history),
+    no la fecha de ejecución del script.
+    """
     yahoo_ticker = TICKER_MAP.get(ticker) if ticker else ISIN_MAP.get(isin)
     if not yahoo_ticker:
-        return None, None, f"sin mapeo ({ticker}/{isin})"
+        return None, None, None, f"sin mapeo ({ticker}/{isin})"
 
     try:
         t = yf.Ticker(yahoo_ticker)
-        # period 5d para cubrir fines de semana y fondos UCITS con liquidez T+1/T+2
         hist = t.history(period="5d")
         if hist.empty:
-            return None, None, "sin datos"
+            return None, None, None, "sin datos"
         close = Decimal(str(hist["Close"].iloc[-1]))
+        price_date = hist.index[-1].date().isoformat()
 
-        # Caso especial: BTC-EUR ya viene en EUR
+        # BTC-EUR ya viene en EUR
         if yahoo_ticker.endswith("-EUR"):
-            return close, close, None
+            return close, close, price_date, None
 
-        rate = fetch_eur_rate(currency)
+        rate, _ = fetch_eur_rate(currency)
         if rate is None:
-            return close, None, "sin tipo cambio"
-        close_eur = close * rate
-        return close, close_eur, None
+            return close, None, price_date, "sin tipo cambio"
+        return close, close * rate, price_date, None
 
     except Exception as e:
-        return None, None, str(e)
+        return None, None, None, str(e)
 
 
-def upsert_holding_price(ticker, isin, close_orig, close_eur, currency):
-    """
-    DELETE + INSERT en lugar de UPSERT.
+def upsert_holding_price(ticker, isin, close_orig, close_eur, currency, price_date):
+    """DELETE + INSERT en lugar de UPSERT.
     El índice único en holding_prices es sobre expresiones:
       (COALESCE(ticker,''), COALESCE(isin,''), date)
     PostgREST no acepta on_conflict con expresiones, solo columnas.
+    Usa price_date (fecha real de cierre) en vez de TODAY (fecha de ejecución).
     """
-    del_q = sb.table("holding_prices").delete().eq("date", TODAY)
+    del_q = sb.table("holding_prices").delete().eq("date", price_date)
     if ticker is not None:
         del_q = del_q.eq("ticker", ticker)
     else:
@@ -171,7 +181,7 @@ def upsert_holding_price(ticker, isin, close_orig, close_eur, currency):
     sb.table("holding_prices").insert({
         "ticker": ticker,
         "isin": isin,
-        "date": TODAY,
+        "date": price_date,
         "close_original": float(close_orig),
         "currency": currency,
         "close_eur": float(close_eur) if close_eur else None,
@@ -185,8 +195,7 @@ def main():
     print(f"Holdings unicos: {len(holdings)}\n")
 
     inserted = 0
-    skipped = 0
-    errors = 0
+    failed = []
 
     for h in holdings:
         ticker = h["ticker"]
@@ -194,25 +203,29 @@ def main():
         currency = h["currency"]
         label = ticker or isin or "?"
 
-        close_orig, close_eur, err = fetch_price(ticker, isin, currency)
+        close_orig, close_eur, price_date, err = fetch_price(ticker, isin, currency)
 
         if err:
             print(f"  X {label:14s}  {err}")
-            skipped += 1
+            failed.append(label)
             continue
 
         try:
-            upsert_holding_price(ticker, isin, close_orig, close_eur, currency)
+            upsert_holding_price(ticker, isin, close_orig, close_eur, currency, price_date)
         except Exception as e:
             print(f"  ! {label:14s}  insert fallo: {e}")
-            errors += 1
+            failed.append(label)
             continue
 
         eur_str = f"{float(close_eur):.2f}EUR" if close_eur else "-"
-        print(f"  OK {label:14s}  {float(close_orig):>10.2f} {currency} -> {eur_str}")
+        print(f"  OK {label:14s}  {float(close_orig):>10.2f} {currency}  fecha={price_date}  -> {eur_str}")
         inserted += 1
 
-    print(f"\nResumen: {inserted} actualizados, {skipped} sin datos, {errors} errores\n")
+    print(f"\nResumen: {inserted} actualizados, {len(failed)} sin precio\n")
+
+    if failed:
+        print(f"ERROR: tickers sin precio: {', '.join(failed)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
