@@ -111,6 +111,42 @@ def eb_get(path: str, params: Optional[dict] = None) -> dict:
     return resp.json()
 
 
+def fetch_account_balance(account_uid: str) -> tuple:
+    """
+    Llama a GET /accounts/{uid}/balances (PSD2 AIS, Enable Banking).
+    Devuelve (amount: float, reference_date: str) o (None, None) si falla.
+    Preferencia de tipo: CLBD (Closing Ledger) > CLAV (Closing Available) > primera disponible.
+    No aborta el sync si el endpoint no está disponible para un ASPSP concreto.
+    """
+    try:
+        data = eb_get(f'/accounts/{account_uid}/balances')
+        balances = data.get('balances', [])
+        if not balances:
+            return None, None
+        for preferred in ('CLBD', 'CLAV'):
+            for b in balances:
+                if b.get('balance_type') == preferred:
+                    amt   = b.get('balance_amount', {})
+                    amount = float(amt.get('amount', 0))
+                    cdi    = b.get('credit_debit_indicator', 'CRDT')
+                    signed = -amount if cdi == 'DBIT' else amount
+                    ref_date = (b.get('reference_date')
+                                or datetime.now(timezone.utc).strftime('%Y-%m-%d'))
+                    return signed, ref_date
+        # fallback: primer balance disponible
+        b      = balances[0]
+        amt    = b.get('balance_amount', {})
+        amount = float(amt.get('amount', 0))
+        cdi    = b.get('credit_debit_indicator', 'CRDT')
+        signed = -amount if cdi == 'DBIT' else amount
+        ref_date = (b.get('reference_date')
+                    or datetime.now(timezone.utc).strftime('%Y-%m-%d'))
+        return signed, ref_date
+    except Exception as e:
+        logger.warning(f'  ⚠️  Balance endpoint falló para {account_uid[:8]}...: {e}')
+        return None, None
+
+
 def fetch_account_transactions(account_uid: str, days_back: int = 89) -> list:
     date_from = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime('%Y-%m-%d')
     params = {'date_from': date_from}
@@ -454,6 +490,23 @@ def sync_psd2():
             'last_sync_at': datetime.now(timezone.utc).isoformat()
         }).eq('id', link['id']).execute()
 
+        # Ancla de saldo: saldo real del banco para balance_checks
+        if not DRY_RUN:
+            real_bal, bal_date = fetch_account_balance(uid)
+            if real_bal is not None and bal_date is not None:
+                try:
+                    sb.table('balance_checks').upsert({
+                        'account_id':   account_id,
+                        'check_date':   bal_date,
+                        'real_balance': real_bal,
+                        'source':       'enable_banking',
+                    }, on_conflict='account_id,check_date').execute()
+                    logger.info(f'  ⚓ Balance check: {real_bal:.2f} EUR ({bal_date})')
+                except Exception as e:
+                    logger.warning(f'  ⚠️  No se pudo guardar balance_check: {e}')
+            else:
+                logger.warning(f'  ⚠️  Sin datos de balance para {aspsp}')
+
     if not DRY_RUN:
         try:
             res = sb.rpc('fn_supersede_pending_booked').execute()
@@ -467,6 +520,24 @@ def sync_psd2():
         f'{total_inserted} insertadas ({total_rules_applied} con regla) · '
         f'{total_updated} actualizadas · {total_unchanged} sin cambios'
     )
+
+    # Pulso del job
+    run_status = 'error' if accounts_with_4xx else 'ok'
+    try:
+        sb.table('job_runs').insert({
+            'job_name': 'sync_psd2',
+            'status':   run_status,
+            'detail': {
+                'txns_downloaded':  total_txns,
+                'inserted':         total_inserted,
+                'updated':          total_updated,
+                'unchanged':        total_unchanged,
+                'rules_applied':    total_rules_applied,
+                'accounts_4xx':     accounts_with_4xx,
+            },
+        }).execute()
+    except Exception as e:
+        logger.warning(f'⚠️  No se pudo guardar job_run: {e}')
 
     if accounts_with_4xx:
         logger.error(

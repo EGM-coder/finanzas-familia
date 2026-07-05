@@ -798,6 +798,38 @@ Concesiones de visibilidad entre titulares. Asimétrica (una fila por dirección
 **GRANT:** SELECT, INSERT, UPDATE, DELETE a `authenticated` (INV-6).  
 **Seed:** 2 filas de continuidad pre-armadas (`eric→ana` y `ana→eric`), ambas con `is_active=false`. Se activan con acto deliberado.
 
+### 2.33 · `public.job_runs` *(mig-69)*
+
+Registro de pulso por job. Una fila por ejecución. `status` refleja el resultado real: si algún ticker falla → `partial`; si todos fallan o hay 4xx → `error`; si todo va bien → `ok`. `detail` jsonb libre por job.
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | `gen_random_uuid()` |
+| `job_name` | text NOT NULL | `sync_psd2`, `update_prices`, … |
+| `run_at` | timestamptz NOT NULL | `DEFAULT now()` |
+| `status` | text NOT NULL | CHECK: `ok`, `error`, `partial` |
+| `detail` | jsonb | Libre por job; e.g. `{inserted, failed, accounts_4xx, …}` |
+
+**Índice:** `(job_name, run_at DESC)`.  
+**RLS:** SELECT para `authenticated` (`auth.uid() IS NOT NULL`). Escritura exclusiva por `service_role` (BYPASSRLS; sin policy de escritura). INV-6: GRANT SELECT + policy ambos.
+
+---
+
+### 2.34 · `public.balance_checks` *(mig-69)*
+
+Ancla de saldo diaria: saldo real del banco (Enable Banking) por cuenta PSD2. Se compara contra `account_balances_full.current_balance` en `/estado`. Un registro por (account_id, check_date); upsert en cada sync.
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | `gen_random_uuid()` |
+| `account_id` | uuid NOT NULL FK → `accounts(id)` | |
+| `check_date` | date NOT NULL | Fecha del saldo (referenceDate de Enable Banking) |
+| `real_balance` | numeric NOT NULL | Saldo banco firmado en EUR |
+| `source` | text NOT NULL | DEFAULT `'enable_banking'` |
+
+**Constraints:** `UNIQUE(account_id, check_date)`.  
+**RLS:** SELECT con filtro de visibilidad: `accounts.visibility = 'privada_' || user_role() OR = 'compartida'` — impide que Eric vea BBVA y Ana Kutxabank. Escritura solo `service_role`. INV-6: GRANT SELECT + policy ambos.
+
 ---
 
 ## 3 · Vistas
@@ -1131,6 +1163,8 @@ Por scope visible al usuario: el último cierre semanal en `weekly_closures`.
 | `purchase_order_charges` | ✓ RLS | ✓ mig 37 | ✓ mig 37 | ✓ mig 42+44 | via can_see_transaction() |
 | `income_charges` | ✓ mig 50 | ✓ mig 50 | ✓ mig 50 | ✓ mig 50 | can_see_transaction() + incomes.user_id |
 | `shares` | ✓ mig 55 | ✓ mig 55 | ✓ mig 55 | ✓ mig 55 | SELECT si participas; INSERT/UPDATE/DELETE solo como grantor |
+| `job_runs` | ✓ mig-69 | — | — | — | Escritura solo service_role (BYPASSRLS) |
+| `balance_checks` | ✓ mig-69 | — | — | — | Escritura solo service_role; SELECT filtra visibilidad de accounts |
 
 ---
 
@@ -1214,6 +1248,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260629000063 | `fn_close_week_vs_habitual.sql` | D-022: reescritura fn_close_week — semáforo vs habitual (mediana 8 semanas por categoría). ALTER TABLE DROP NOT NULL en semaforo y total_budget. total_budget=NULL (presupuesto diferido, T-037 DORMIDA). semaforo=NULL si baseline < 4 semanas. top_deviations ahora contiene spent/habitual/delta (no budget). Gate de salud sin budget_cobertura. health_reason parafraseado §4.5. Fix: array_append() en v_health_parts (evita ERROR 22P02 que causaba `|| 'literal'` con tipo unknown). Re-verifica REVOKE FROM PUBLIC + GRANT service_role (P-022). |
 | 20260629000064 | `project_kind_view_exclusion.sql` | D-023: (1) projects.kind text NOT NULL DEFAULT 'general' CHECK (general, viaje) — clasificación informativa del proyecto. (2) v_spent_by_category_week: añade `AND t.project_id IS NULL` en ambas ramas (splits + directa). (3) v_spent_by_category_month: ídem. El gasto con project_id vive en el sobre del proyecto, no como gasto de categoría; cambia sustractivo, no rompe shape de ningún consumidor (fn_close_week, v_category_budget_status, v_median_spend_3m_by_category). |
 | 20260701000065 | `fn_close_week_discrecional.sql` | D-024: (1) Nueva vista v_discretionary_spend_by_category_week = v_spent_by_category_week + AND t.nature IS DISTINCT FROM 'fijo_recurrente'. GRANT SELECT authenticated. (2) fn_close_week: total_spent sigue v_spent_by_category_week (gasto real); semaforo/total_habitual/top_deviations pasan a v_discretionary_spend_by_category_week. INNER JOIN en ratio y top_deviations → cats sin histórico discrecional excluidas del juicio. v_disc_spent_for_ratio = spent discrecional solo de cats con habitual. P-022 re-verificado (REVOKE + GRANT service_role). |
+| 20260705000069 | `observability_job_runs_balance_checks.sql` | D-026: `job_runs` (pulso de job: job_name, status ok/error/partial, detail jsonb) + `balance_checks` (ancla de saldo real por cuenta PSD2: account_id, check_date, real_balance). RLS + GRANT SELECT authenticated en ambas (INV-6). Escritura solo service_role (BYPASSRLS). Índice (job_name, run_at DESC) en job_runs. |
 
 ---
 

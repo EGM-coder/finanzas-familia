@@ -11,6 +11,22 @@ const CONTROL_SIN_CLASIF = '/control?view=apuntes&ver=sin_clasificar'
 
 type Entry = { mk?: string; tx: string; nota?: string }
 
+type JobRunRow = {
+  job_name: string
+  run_at: string
+  status: 'ok' | 'error' | 'partial'
+  detail: Record<string, unknown> | null
+}
+
+type BalanceCheckRow = {
+  account_id: string
+  check_date: string
+  real_balance: number
+  accounts: { name: string } | null
+}
+
+type AcctBalRow = { id: string; current_balance: number }
+
 type DupRow = {
   account_name: string
   txn_date: string
@@ -89,16 +105,34 @@ export default async function EstadoPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [dupsResult, closureResult, sinClasResult] = await Promise.all([
-    supabase.rpc('fn_pending_review_dups'),
-    supabase.from('v_last_closure_health').select('*'),
-    supabase
-      .from('transactions')
-      .select('id', { count: 'exact', head: true })
-      .is('category_id', null)
-      .lt('amount', 0)
-      .is('superseded_by', null),
-  ])
+  const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)
+
+  const [dupsResult, closureResult, sinClasResult, jobRunsResult, balChecksResult, acctBalResult] =
+    await Promise.all([
+      supabase.rpc('fn_pending_review_dups'),
+      supabase.from('v_last_closure_health').select('*'),
+      supabase
+        .from('transactions')
+        .select('id', { count: 'exact', head: true })
+        .is('category_id', null)
+        .lt('amount', 0)
+        .is('superseded_by', null),
+      supabase
+        .from('job_runs')
+        .select('job_name,run_at,status,detail')
+        .order('run_at', { ascending: false })
+        .limit(40),
+      supabase
+        .from('balance_checks')
+        .select('account_id,check_date,real_balance,accounts(name)')
+        .gte('check_date', twoDaysAgo)
+        .order('check_date', { ascending: false })
+        .limit(30),
+      supabase
+        .from('account_balances_full')
+        .select('id,current_balance')
+        .eq('is_active', true),
+    ])
 
   const { data: rawDups, error: dupsError } = dupsResult
   if (dupsError) console.error('[estado] fn_pending_review_dups:', dupsError.message)
@@ -108,6 +142,25 @@ export default async function EstadoPage() {
 
   const dups: DupRow[] = (rawDups as DupRow[] | null) ?? []
   const closures: ClosureRow[] = (rawClosures as ClosureRow[] | null) ?? []
+
+  // Jobs: latest run per job_name
+  const jobRuns: JobRunRow[] = (jobRunsResult.data as JobRunRow[] | null) ?? []
+  const latestByJob = new Map<string, JobRunRow>()
+  for (const r of jobRuns) {
+    if (!latestByJob.has(r.job_name)) latestByJob.set(r.job_name, r)
+  }
+
+  // Balance checks: latest per account_id
+  const balChecks: BalanceCheckRow[] = (balChecksResult.data as BalanceCheckRow[] | null) ?? []
+  const latestCheckByAcct = new Map<string, BalanceCheckRow>()
+  for (const c of balChecks) {
+    if (!latestCheckByAcct.has(c.account_id)) latestCheckByAcct.set(c.account_id, c)
+  }
+
+  const acctBals: AcctBalRow[] = (acctBalResult.data as AcctBalRow[] | null) ?? []
+  const balByAcct = new Map(acctBals.map(a => [a.id, a.current_balance]))
+
+  const todayStr = new Date().toISOString().slice(0, 10)
   const dupCount: number | '—' = dupsError ? '—' : dups.length
   const dupColor = dupsError
     ? 'var(--signal-neg)'
@@ -361,6 +414,112 @@ export default async function EstadoPage() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* ── Jobs · pulso de automatización ──────────────── */}
+      <div className="card" style={{ padding: 24, marginTop: 20 }}>
+        <div className="label" style={{ marginBottom: 12 }}>Jobs · pulso de automatización</div>
+        {latestByJob.size === 0 ? (
+          <div className="roman" style={{ fontSize: 12, color: 'var(--ink-4)' }}>
+            Sin registros aún — aparecerán tras el primer run con la versión actual.
+          </div>
+        ) : (
+          [...latestByJob.entries()].map(([jobName, run], i, arr) => {
+            const ageH = (Date.now() - new Date(run.run_at).getTime()) / 3_600_000
+            const staleLimit = jobName === 'sync_psd2' ? 36 : 96   // 36h / 4 días
+            const isStale    = ageH > staleLimit
+            const dotColor   = run.status === 'error'
+              ? 'var(--signal-neg)'
+              : (isStale || run.status === 'partial')
+                ? 'var(--signal-warn)'
+                : 'var(--signal-pos)'
+            const ageStr = ageH < 1
+              ? `${Math.round(ageH * 60)}m`
+              : ageH < 48
+                ? `${ageH.toFixed(0)}h`
+                : `${(ageH / 24).toFixed(0)}d`
+            const runAtLocal = new Date(run.run_at).toLocaleString('es-ES', {
+              dateStyle: 'short', timeStyle: 'short',
+            })
+            const statusLabel = isStale && run.status === 'ok'
+              ? 'ok · congelado'
+              : run.status
+            return (
+              <div
+                key={jobName}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '140px 130px 44px 1fr',
+                  gap: 8,
+                  padding: '7px 0',
+                  borderBottom: i < arr.length - 1 ? '1px solid var(--rule-2)' : undefined,
+                  alignItems: 'baseline',
+                }}
+              >
+                <span className="num" style={{ fontSize: 12 }}>{jobName}</span>
+                <span className="roman" style={{ fontSize: 11, color: 'var(--ink-3)' }}>{runAtLocal}</span>
+                <span className="num" style={{ fontSize: 11, color: dotColor }}>{ageStr}</span>
+                <span className="roman" style={{ fontSize: 11, color: dotColor }}>{statusLabel}</span>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* ── Ancla de saldo · verificación vs banco ───────── */}
+      <div className="card" style={{ padding: 24, marginTop: 20 }}>
+        <div className="label" style={{ marginBottom: 12 }}>Ancla de saldo · banco vs calculado</div>
+        {latestCheckByAcct.size === 0 ? (
+          <div className="roman" style={{ fontSize: 12, color: 'var(--signal-warn)' }}>
+            Sin anclas aún — se llenarán en el próximo sync PSD2.
+          </div>
+        ) : (
+          [...latestCheckByAcct.entries()].map(([acctId, check], i, arr) => {
+            const acctName      = (check.accounts as { name: string } | null)?.name ?? acctId.slice(0, 8)
+            const calcBalance   = balByAcct.get(acctId)
+            const delta         = calcBalance !== undefined
+              ? check.real_balance - calcBalance
+              : null
+            const isToday       = check.check_date === todayStr
+
+            let anchorColor: string
+            let anchorLabel: string
+            if (!isToday) {
+              anchorColor = 'var(--signal-warn)'
+              anchorLabel = `sin ancla hoy · última ${check.check_date}`
+            } else if (delta === null) {
+              anchorColor = 'var(--ink-4)'
+              anchorLabel = 'sin balance calculado'
+            } else if (Math.abs(delta) <= 0.01) {
+              anchorColor = 'var(--signal-pos)'
+              anchorLabel = '↔ ok'
+            } else {
+              anchorColor = 'var(--signal-neg)'
+              anchorLabel = `Δ ${delta >= 0 ? '+' : ''}${fmtAmt(delta)} €`
+            }
+
+            return (
+              <div
+                key={acctId}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '140px 100px 100px 1fr',
+                  gap: 8,
+                  padding: '7px 0',
+                  borderBottom: i < arr.length - 1 ? '1px solid var(--rule-2)' : undefined,
+                  alignItems: 'baseline',
+                }}
+              >
+                <span className="roman" style={{ fontSize: 12 }}>{acctName}</span>
+                <span className="num" style={{ fontSize: 12 }}>{fmtAmt(check.real_balance)} €</span>
+                <span className="num" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                  {calcBalance !== undefined ? `${fmtAmt(calcBalance)} €` : '—'}
+                </span>
+                <span className="roman" style={{ fontSize: 11, color: anchorColor }}>{anchorLabel}</span>
+              </div>
+            )
+          })
+        )}
       </div>
 
       {/* TODO: ubicación final del acceso a /estado pendiente decisión Eric */}

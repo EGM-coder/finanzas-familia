@@ -223,6 +223,22 @@ def main():
 
     print(f"\nResumen: {inserted} actualizados, {len(failed)} sin precio\n")
 
+    # Pulso del job
+    if len(failed) == 0:
+        job_status = 'ok'
+    elif inserted > 0:
+        job_status = 'partial'
+    else:
+        job_status = 'error'
+    try:
+        sb.table('job_runs').insert({
+            'job_name': 'update_prices',
+            'status':   job_status,
+            'detail':   {'inserted': inserted, 'failed': failed},
+        }).execute()
+    except Exception as e:
+        print(f"  WARN: no se pudo guardar job_run: {e}")
+
     if failed:
         print(f"ERROR: tickers sin precio: {', '.join(failed)}")
         sys.exit(1)
