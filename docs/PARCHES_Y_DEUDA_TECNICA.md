@@ -344,6 +344,23 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
+## P-027 · 06-jul-2026 · **PERMANENTE**
+**Los grants inertes son deuda de seguridad — el perímetro se construye en capas**
+
+El rol `anon` (peticiones no autenticadas a PostgREST) tenía `SELECT` sobre las 52 tablas y vistas del schema `public`, concedido por defecto al crear el proyecto Supabase. El frontend nunca usa `anon` (login obligatorio), pero si una vista nueva olvidara `security_invoker=true` o una policy fuera laxa, esos grants convertirían la clave anon del bundle en una fuga pública sin fricción adicional.
+
+Auditado el 06-jul-2026: 0 brechas activas (18 vistas con `security_invoker=true`, policies RLS correctas), pero la defensa de una sola capa no es suficiente.
+
+**Fix (mig-71):**
+1. `REVOKE ALL ON ALL TABLES/SEQUENCES/FUNCTIONS IN SCHEMA public FROM anon` — cierra los 52 SELECT existentes.
+2. `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES/SEQUENCES/FUNCTIONS FROM anon` — objetos futuros nacen cerrados para `anon`.
+
+Verificado: `SELECT count(*) FROM information_schema.role_table_grants WHERE grantee='anon' AND table_schema='public'` → **0**. Default privileges tablas: `{authenticated=r/postgres, service_role=arwdDxtm/postgres}` — sin `anon`.
+
+**Regla:** en cualquier proyecto Supabase nuevo, incluir esta revocación en la primera migración de hardening. Los defaults de Supabase otorgan `SELECT` a `anon` en todas las tablas nuevas; no es opt-in, hay que revocar activamente. `authenticated` y `service_role` intactos; ninguna policy tocada.
+
+---
+
 ## P-026 · 05-jul-2026 · **PERMANENTE**
 **Ninguna operación destructiva sin solicitud explícita — proponer y esperar aprobación**
 

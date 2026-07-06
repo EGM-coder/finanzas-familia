@@ -1,4 +1,4 @@
-# EGMFin · SCHEMA.md — Fuente de verdad (28-jun-2026)
+# EGMFin · SCHEMA.md — Fuente de verdad (06-jul-2026)
 
 > **Generado desde:** lectura directa de las 61 migraciones en `supabase/migrations/`  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible en este entorno.  
@@ -21,6 +21,7 @@
 - **Vistas:** todas con `security_invoker=true` — heredan RLS del usuario que ejecuta.
 - **INV-6:** RLS sin GRANT de tabla → 42501 silencioso (200 + 0 filas). Ver grants por tabla en §4.
 - **Sin DELETE** en tablas de historial: `transactions`, `budgets`, `weekly_closures`, `monthly_closures`, `incomes`.
+- **anon sin privilegios en public (mig-71, P-027):** `anon` tiene 0 grants en el schema `public` (tablas, vistas, secuencias, funciones). Default privileges revocados para `postgres` → objetos futuros nacen cerrados. Login obligatorio para toda lectura; el acceso `anon` a PostgREST es innecesario y fue eliminado como defensa en profundidad.
 
 ---
 
@@ -1169,6 +1170,8 @@ Por scope visible al usuario: el último cierre semanal en `weekly_closures`.
 | `job_runs` | ✓ mig-69 | — | — | — | Escritura solo service_role (BYPASSRLS) |
 | `balance_checks` | ✓ mig-69 | — | — | — | Escritura solo service_role; SELECT filtra visibilidad de accounts |
 
+> **Nota anon (mig-71):** `anon` no tiene ningún privilegio en el schema `public`. Ninguna tabla, vista, secuencia ni función es accesible para peticiones no autenticadas a PostgREST. Verificado: `SELECT count(*) FROM information_schema.role_table_grants WHERE grantee='anon' AND table_schema='public'` → 0 (P-027).
+
 ---
 
 ## 5 · Índice de migraciones
@@ -1253,6 +1256,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260701000065 | `fn_close_week_discrecional.sql` | D-024: (1) Nueva vista v_discretionary_spend_by_category_week = v_spent_by_category_week + AND t.nature IS DISTINCT FROM 'fijo_recurrente'. GRANT SELECT authenticated. (2) fn_close_week: total_spent sigue v_spent_by_category_week (gasto real); semaforo/total_habitual/top_deviations pasan a v_discretionary_spend_by_category_week. INNER JOIN en ratio y top_deviations → cats sin histórico discrecional excluidas del juicio. v_disc_spent_for_ratio = spent discrecional solo de cats con habitual. P-022 re-verificado (REVOKE + GRANT service_role). |
 | 20260705000069 | `observability_job_runs_balance_checks.sql` | D-026: `job_runs` (pulso de job: job_name, status ok/error/partial, detail jsonb) + `balance_checks` (ancla de saldo real por cuenta PSD2: account_id, check_date, real_balance). RLS + GRANT SELECT authenticated en ambas (INV-6). Escritura solo service_role (BYPASSRLS). Índice (job_name, run_at DESC) en job_runs. |
 | 20260705000070 | `reconciliacion_backfill_deuda_tecnica.sql` | D-027+D-028: (1) Extiende transactions.source CHECK con 'backfill_extracto'. (2) ADD COLUMN dup_reviewed_at timestamptz + dup_review_note text en transactions. (3) Vistas de gasto (v_spent_by_category_week/month + v_discretionary) añaden AND source='psd2' — exclusión intencional de backfill en analytics. (4) fn_pending_review_dups + fn_close_week inline dup check: excluye grupos totalmente revisados. (5) Marca 9 filas de 3 grupos históricos como revisados. (6) Backfill 22 txns pre-PSD2 (14 Santander + 8 Kutxabank), source=backfill_extracto. (7) Re-ancla initial_balance (Santander 803.77→1047.35, Kutxabank 2151.66→31703.54). (8) Liabilities datos reales (Préstamo coche 26549.29/388.93, Préstamo máster 3010.55/237.72). (9) Holdings ISIN BRK.B+NVDA NULL→reales. (10) DELETE holding_prices huérfanas (BRK.B/NVDA isin=NULL). |
+| 20260706000071 | `revoke_anon_public.sql` | P-027: hardening — REVOKE ALL ON ALL TABLES/SEQUENCES/FUNCTIONS IN SCHEMA public FROM anon + ALTER DEFAULT PRIVILEGES FOR ROLE postgres REVOKE ALL ON TABLES/SEQUENCES/FUNCTIONS FROM anon. anon=0 grants verificado; default privileges tablas = {authenticated=r/postgres, service_role=arwdDxtm/postgres}. |
 
 ---
 
@@ -1268,4 +1272,5 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 - **P-008 / D-001:** holding_prices acepta ticker=NULL AND isin=NULL. CHECK constraint pendiente (baja prioridad).
 - **`supabase db dump --linked`** requiere Docker. Para volcado fiel: iniciar Docker y ejecutar `npx supabase db dump --schema public --linked > docs/schema_dump.sql` antes del siguiente release.
 - **P-022 (permanente):** Postgres concede `EXECUTE` a `PUBLIC` por defecto en toda función nueva. PostgREST expone `public` a `anon`. Regla: en cada función `SECURITY DEFINER` nueva, incluir inmediatamente `REVOKE EXECUTE FROM PUBLIC` + `GRANT EXECUTE TO <rol>`. Helpers INVOKER de RLS (can_*, user_role): conservar siempre `authenticated`; endurecer `anon` en T-039. Verificar con `has_function_privilege('anon', oid, 'EXECUTE')` (P-021).
+- **P-027 (permanente):** `anon` no tiene privilegios en el schema `public` (mig-71). Default privileges revocados para `postgres` → objetos futuros nacen cerrados para `anon`. Login obligatorio para toda lectura. En proyectos Supabase nuevos, incluir esta revocación en la primera migración de hardening.
 - **mig-51 (10-jun-2026):** parche de datos exclusivamente (UPDATE/INSERT en `transactions` y `classification_rules`). No altera ninguna definición de tabla, vista, RLS ni GRANT — §2/§3/§4 permanecen válidos. Idempotente (guards `IS DISTINCT FROM`, `WHERE NOT EXISTS`).
