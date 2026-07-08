@@ -1,9 +1,12 @@
-# EGMFin · SCHEMA.md — Fuente de verdad (06-jul-2026)
+# EGMFin · SCHEMA.md — Fuente de verdad (8-jul-2026)
 
-> **Generado desde:** lectura directa de las 61 migraciones en `supabase/migrations/`  
-> **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible en este entorno.  
-> **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8).  
+> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **72 migraciones** aplicadas (hasta `20260706115434`).  
+> **Reconciliación 8-jul-2026:** el doc estaba congelado en mig-50 (7-jun). Esta revisión incorpora migs 51–71 del sprint de módulo cuentas (12-jun) y saneamiento/observabilidad (28-jun→06-jul). Cambios marcados con `‹recon 8-jul›`.  
+> **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible. Volcado por MCP en su lugar.  
+> **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8). El desfase de 21 migraciones que motivó esta reconciliación es la prueba de por qué PRO-8 no es opcional.  
 > **P-009 (regla permanente):** antes de cualquier query nuevo, verificar columnas reales aquí o con `\d+ tabla`.
+>
+> **⚠ Anomalías abiertas detectadas en la reconciliación (ver §6):** (2) migración `revoke_anon_public` duplicada en el ledger sin archivo pareja; (3) `balance_checks_select` sin guard `auth.uid() IS NOT NULL`. *(A1 `stock_option_grants` RESUELTA mig-72 08-jul. A4 `can_read_account`/`can_see_account` investigada y resuelta: split lectura/escritura deliberado, no anomalía — ver §6.1.)*
 
 ---
 
@@ -12,16 +15,14 @@
 - **RLS habilitado** en todas las tablas. Nunca `service_role` en frontend.
 - **Patrones de policy (3 grupos):**
   - **Grupo A** (estricto, por user_id): `incomes`, `work_abroad_days`, `bank_connections` — solo el dueño.
-  - **Grupo C** (tri-state visibility): `accounts`, `assets`, `budgets`, `categories`, `liabilities`, `savings_goals`, `weekly_closures`, `monthly_closures` — `auth.uid() IS NOT NULL AND (visibility='privada_'||user_role() OR visibility='compartida')`. Guard `auth.uid() IS NOT NULL` añadido en mig 32. **SELECT de `accounts` es share-aware desde mig 56 (usa `can_see_visibility()`).**
-  - **Grupo D** (función helper): `transactions`, `holdings`, `transaction_splits`, `bank_account_links`, `manual_holdings`, `manual_holdings_history` — `can_see_account()` / `can_see_transaction()` / `can_read_account()`. SELECT share-aware desde mig 56–57; escritura estricta sin cambios.
-- **Principio B2 (compartir = solo lectura, mig 56–58):** `can_see_visibility()` y `can_read_account()` amplían el acceso de lectura si existe una fila activa en `shares` (scope `private_detail` o `continuity`). Escritura siempre estricta: `can_see_account()` para cuentas-ancladas, `owner_role = user_role()` para `stock_options`. `stock_options` reutiliza `can_see_visibility('privada_'||owner_role)` para SELECT — misma semántica, sin helper nuevo.
+  - **Grupo C** (tri-state visibility): `accounts`, `assets`, `budgets`, `categories`, `liabilities`, `savings_goals`, `weekly_closures`, `monthly_closures` — `auth.uid() IS NOT NULL AND (visibility='privada_'||user_role() OR visibility='compartida')`. Guard `auth.uid() IS NOT NULL` añadido en mig 32 (antes anon key podía leer `compartida`).
+  - **Grupo D** (función helper): `transactions`, `holdings`, `transaction_splits`, `bank_account_links` — `can_see_account()` o `can_see_transaction()`, ambas con `auth.uid() IS NOT NULL` desde mig 32.
 - **Visibilidad tri-state:** `privada_eric` | `privada_ana` | `compartida`. Aplica a `accounts`, `assets`, `budgets`, `savings_goals`, `liabilities`, `categories` (cuando `is_default=false`), `weekly_closures`, `monthly_closures`.
 - **Tablas públicas (mercado):** `holding_prices`, `currency_rates` — SELECT con `TRUE`, sin restricción de usuario.
-- **Tablas compartidas sin filtro V1:** `maristas_items`, `projects`, `stock_prices` — `auth.role()='authenticated'`.
+- **Tablas compartidas sin filtro V1:** `stock_options`, `manual_holdings`, `manual_holdings_history`, `maristas_items`, `projects`, `stock_prices` — `auth.role()='authenticated'`.
 - **Vistas:** todas con `security_invoker=true` — heredan RLS del usuario que ejecuta.
 - **INV-6:** RLS sin GRANT de tabla → 42501 silencioso (200 + 0 filas). Ver grants por tabla en §4.
 - **Sin DELETE** en tablas de historial: `transactions`, `budgets`, `weekly_closures`, `monthly_closures`, `incomes`.
-- **anon sin privilegios en public (mig-71, P-027):** `anon` tiene 0 grants en el schema `public` (tablas, vistas, secuencias, funciones). Default privileges revocados para `postgres` → objetos futuros nacen cerrados. Login obligatorio para toda lectura; el acceso `anon` a PostgREST es innecesario y fue eliminado como defensa en profundidad.
 
 ---
 
@@ -33,14 +34,8 @@
 ### `public.set_updated_at() → trigger`
 `plpgsql` — Setea `new.updated_at = now()` antes de UPDATE. Aplicada via trigger en todas las tablas con `updated_at`.
 
-### `public.can_see_visibility(p_visibility text) → boolean` *(mig 56)*
-`sql SECURITY DEFINER STABLE` — Helper share-aware para lectura. Retorna `true` si: (a) `p_visibility = 'compartida'`; (b) `p_visibility = 'privada_' || user_role()`; o (c) existe en `shares` una fila activa (`is_active=true`, `scope IN ('private_detail','continuity')`) donde `grantee_role = user_role()` y `grantor_role` coincide con la parte privada de `p_visibility`. `auth.uid() IS NOT NULL` implícito. Usada en: policy SELECT de `accounts`; internamente por `can_read_account()`.
-
-### `public.can_read_account(p_account_id uuid) → boolean` *(mig 56)*
-`sql SECURITY DEFINER STABLE` — Llama a `can_see_visibility(a.visibility)` para la cuenta dada. Usada en: policies SELECT de `holdings` y `transactions`. **No sustituye `can_see_account()`** — ésta sigue activa en INSERT/UPDATE y en `bank_account_links`.
-
 ### `public.can_see_account(p_account_id uuid) → boolean`
-`sql SECURITY DEFINER STABLE` — `auth.uid() IS NOT NULL AND EXISTS(SELECT 1 FROM accounts WHERE id=p_account_id AND visibility matches)`. Guard de escritura para INSERT/UPDATE en `transactions`, `holdings`, `bank_account_links`. **No share-aware** (deliberado: compartir es solo lectura).
+`sql SECURITY DEFINER STABLE` — `auth.uid() IS NOT NULL AND EXISTS(SELECT 1 FROM accounts WHERE id=p_account_id AND visibility matches)`. **Gate de ESCRITURA (solo dueño; `shares` NO extiende escritura).** ‹recon 8-jul› Usado por las policies **INSERT/UPDATE/DELETE** de `transactions`, `holdings`, `manual_holdings`, `manual_holdings_history`, y por las 4 ops (incl. SELECT) de `bank_account_links` — este último no honra shares en lectura, probablemente deliberado (no exponer enlaces PSD2).
 
 ### `public.can_see_transaction(p_transaction_id uuid) → boolean`
 `sql SECURITY DEFINER STABLE` — Navega `transaction_splits → transactions → accounts`, verifica visibility con `auth.uid() IS NOT NULL`. Usada en: `transaction_splits`.
@@ -48,24 +43,26 @@
 ### `public.can_see_order(p_order_id uuid) → boolean`
 `sql SECURITY DEFINER STABLE` — `auth.uid() IS NOT NULL AND EXISTS(SELECT 1 FROM purchase_orders WHERE id=p_order_id AND visibility matches)`. Usada en: `purchase_order_lines`.
 
-### `public.fn_pending_review_dups() → table(account_name, txn_date, amount, description, n)` *(mig 60)*
-`sql STABLE SECURITY INVOKER` — Lista los grupos de transacciones PSD2 activas (`superseded_by IS NULL`) con más de una fila para la misma `(account, date, amount, description)`. Excluye automáticamente los pares `h_`/`er_` ya resueltos por `fn_supersede_pending_booked`. Son los casos ambiguos (todo-`er_`, `h_` huérfana) que requieren revisión humana. **SECURITY INVOKER** (deliberado): hereda la RLS de `transactions` del usuario invocante — cada usuario solo ve duplicados de su ámbito visible (respeta muro B2). `GRANT EXECUTE TO authenticated`. Llamada desde `/estado` en cada carga de página.
-
-**Doctrina:** los duplicados `h_`/`er_` se auto-resuelven vía `fn_supersede_pending_booked`. Los ambiguos (n>1 sin h_) se presentan en `/estado` para revisión manual; no existe lógica automática que los fusione.
-
-### `public.fn_supersede_pending_booked() → integer` *(mig 59 + reescrita mig-66)*
-`plpgsql SECURITY DEFINER` — Auto-resuelve el trap PSD2 PENDING→BOOKED con descripción normalizada (P-023). **v2 (mig-66):** `norm(x) = trim(regexp_replace(lower(replace(x,':','')), '\s+', ' ', 'g'))`. Empareja si `norm(e)=norm(h)` OR `norm(h) ⊂ norm(e)` OR `norm(e) ⊂ norm(h)` — cubre el ":" añadido por Santander y la duplicación de concepto de Kutxabank. Emparejamiento 1:1 estricto via `ROW_NUMBER` por ambos lados (un `er_` no supersede a más de un `h_`; protege Leo/Biel same-date same-amount). Paso 2: hereda `category_id`, `project_id`, `nature`, `is_reimbursable` del `h_` al `er_` si el campo de `er_` es NULL — preserva la decisión humana clasificada en PENDING. Devuelve nº de `h_` neutralizadas. Limitación T-040: exige `date` idéntica; si el banco mueve la fecha valor entre PENDING y BOOKED el par no casará. `GRANT EXECUTE TO service_role` únicamente.
-
-**Doctrina PENDING→BOOKED:** los duplicados `h_`/`er_` se auto-resuelven aquí. Los casos ambiguos (dos `er_` con mismo contenido, `h_` huérfana) se dejan para revisión humana; no existe lógica automática que los fusione.
-
-### `public.fn_close_week(p_week_start date) → void` *(mig 61 + reescrita mig 63)*
-`plpgsql SECURITY DEFINER` — Calcula y hace UPSERT del cierre semanal para los 3 scopes (`privada_eric`, `privada_ana`, `compartida`). Por scope: (1) `total_spent` de `v_spent_by_category_week`; (2) `baseline_weeks` = semanas distintas con dato en las últimas 8 (p_week_start−56d, p_week_start); (3) `total_habitual` = suma de medianas (percentile_cont 0.5) de las 8 semanas previas para las categorías presentes esta semana; (4) `semaforo` = NULL si baseline < 4 semanas (histórico insuficiente, estado temprano legítimo), else verde/ambar/rojo según ratio total_spent/total_habitual (≤1.00/≤1.25/>1.25); (5) `top_deviations` top-3 por (spent−habitual) DESC con delta>0 — campos: category_id, category_name, spent, habitual, delta; (6) gate de salud — pendientes, sincronización bancaria, dups, actividad_cero_sospechosa (sin budget_cobertura — D-022) → `data_health` + `health_reason` (texto parafraseado, sin palabras prohibidas §4.5); (7) `total_budget = NULL` (presupuesto diferido, T-037 DORMIDA); UPSERT preserva `insights` si ya existía. Llama la vista `v_spent_by_category_week` como DEFINER (owner tiene acceso total; el scope lo aplica la propia función). Dups inline (replica fn_pending_review_dups que es INVOKER). `GRANT EXECUTE TO service_role` únicamente. **D-020, D-022.**
-
 ### `public.capture_patrimonio_snapshot() → patrimonio_snapshots`
 `plpgsql SECURITY DEFINER` — Lee vista `patrimonio_neto`, hace UPSERT ON CONFLICT `(snapshot_date)`. `GRANT EXECUTE TO authenticated`.
 
 ### `public.fn_manual_holdings_snapshot() → trigger`
 `plpgsql` — Trigger AFTER INSERT OR UPDATE en `manual_holdings`. Upserta en `manual_holdings_history` cuando cambia `current_value_eur`.
+
+### `public.can_read_account(p_account_id uuid) → boolean` ‹recon 8-jul›
+`sql SECURITY DEFINER STABLE` (mig 56) — **Gate de LECTURA, consciente de `shares`.** Devuelve true si el usuario es dueño por visibilidad *o* tiene una concesión activa en `shares`. Usado por las policies **SELECT** de: `holdings`, `manual_holdings`, `manual_holdings_history`, `transactions`. Convive con `can_see_account` por diseño (split lectura/escritura), no por duplicación: te comparten *ver*, no *escribir*.
+
+### `public.can_see_visibility(p_visibility text) → boolean` ‹recon 8-jul›
+`sql SECURITY DEFINER STABLE` (mig 56) — Recibe un valor de `visibility` (no un id) y resuelve si el usuario actual puede verlo, considerando `user_role()` y las concesiones activas en `shares`. Base del muro tri-state ampliado con compartición explícita.
+
+### `public.fn_supersede_pending_booked() → integer` ‹recon 8-jul›
+`plpgsql SECURITY DEFINER VOLATILE` (mig 59, reescrita v2 en mig 66) — Deduplicador PSD2. Empareja PENDING (`h_`) con BOOKED (`er_`) por **descripción normalizada** (lower, sin `:`, espacios colapsados) + contención bidireccional, 1:1 estricto; marca el duplicado con `superseded_by` y hereda categoría/proyecto/nature del pending si el booked está sin decidir. Devuelve nº de filas neutralizadas. **T-040:** no casa si el banco mueve la fecha entre pending y booked.
+
+### `public.fn_pending_review_dups() → TABLE(account_name text, txn_date date, amount numeric, description text, n bigint)` ‹recon 8-jul›
+`sql SECURITY INVOKER STABLE` (mig 60) — Lista grupos de posibles duplicados ambiguos pendientes de revisión humana. Excluye grupos donde todas las filas tienen `dup_reviewed_at` no nulo. Alimenta la cola de `/estado`.
+
+### `public.fn_close_week(p_week_start date) → void` ‹recon 8-jul›
+`plpgsql SECURITY DEFINER VOLATILE` (mig 63/65) — Cierra una semana en `weekly_closures`: calcula semáforo vs. habitual (mediana 3m) y `data_health` (ok/parcial/roto), diferenciando gasto discrecional (ver `v_discretionary_spend_by_category_week`). Decisión humana explícita, no automática.
 
 ---
 
@@ -79,22 +76,22 @@
 | `name` | text NOT NULL | |
 | `institution` | text NOT NULL | |
 | `type` | text NOT NULL | CHECK: `bank`, `investment`, `broker`, `cash`, `pension`, `card` (mig 07), `tesoreria_tae` (mig 10) |
-| `visibility` | text NOT NULL | CHECK: `privada_eric`, `privada_ana`, `compartida` — muro de privacidad (quién puede VER la cuenta) |
-| `titular` | text NOT NULL | CHECK: `eric`, `ana`, `comun`, `leo`, `biel` (mig 52) — eje de propiedad/destino; distinto de `visibility`: `titular` es de quién ES la cuenta, `visibility` es quién la puede leer. Herencia/sucesión = reasignar `titular`. |
+| `visibility` | text NOT NULL | CHECK: `privada_eric`, `privada_ana`, `compartida` |
 | `currency` | text NOT NULL | DEFAULT 'EUR' |
 | `is_active` | bool NOT NULL | DEFAULT true |
 | `notes` | text | |
 | `sort_order` | int NOT NULL | DEFAULT 0 |
 | `linked_account_id` | uuid FK accounts(id) | mig 07; solo en type='card' |
 | `initial_balance` | numeric(12,2) NOT NULL | mig 07; DEFAULT 0 |
-| `card_mode` | text | **mig-67** CHECK: `credit`, `debit`; NOT NULL si y solo si type='card'. `debit` = débito (saldo en IBAN padre, D-025); `credit` = crédito (P-002, deuda invertida). |
+| `titular` | text NOT NULL | ‹recon 8-jul› mig 52; CHECK: `eric`, `ana`, `comun`, `leo`, `biel`. Dimensión de titularidad para composición por titular (`v_cuentas_composicion`) |
+| `card_mode` | text | ‹recon 8-jul› mig 67; CHECK: `credit`, `debit`; obligatorio si type='card', NULL si no |
 | `created_at` | timestamptz NOT NULL | DEFAULT now() |
 | `updated_at` | timestamptz NOT NULL | DEFAULT now(); trigger set_updated_at |
 
-**Constraints:** `accounts_card_linked_check` — (type='card' AND linked_account_id IS NOT NULL) OR (type≠'card' AND linked_account_id IS NULL). `accounts_titular_check` — titular IN ('eric','ana','comun','leo','biel') (mig 52). `accounts_card_mode_values` — card_mode IN ('credit','debit') (mig-67). `accounts_card_mode_required` — (type='card' AND card_mode IS NOT NULL) OR (type≠'card' AND card_mode IS NULL) (mig-67).  
+**Constraints:** `accounts_card_linked_check` — (type='card' AND linked_account_id IS NOT NULL) OR (type≠'card' AND linked_account_id IS NULL). ‹recon 8-jul› `accounts_card_mode_required` — (type='card' AND card_mode IS NOT NULL) OR (type≠'card' AND card_mode IS NULL); `accounts_card_mode_values` — card_mode ∈ (credit, debit); `accounts_titular_check` — titular ∈ (eric, ana, comun, leo, biel).  
 **Índices:** `accounts_linked_idx` on (linked_account_id).  
 **RLS:** Grupo C (mig 32 guard).  
-**D-025:** Tarjetas débito actuales: 'Tarjeta Santander Ana', 'Tarjeta Santander Eric'. Tarjetas crédito activas: 'Tarjeta BBVA Ana'. **'Tarjeta Kutxabank Eric': `is_active=false` (mig-68)** — no tiene feed PSD2 granular; sus liquidaciones viven en el IBAN (P-024).
+**‹recon 8-jul› card_mode (mig 67, P-002 revisado):** tarjetas Santander son `debit` (cada compra sale del IBAN al instante) → el IBAN padre absorbe sus movimientos y la subcuenta débito muestra saldo 0 (lente de gasto). Kutxabank `credit`, con liquidación mensual (P-002 clásico intacto). Lógica en `account_balances_full`.
 
 ---
 
@@ -138,13 +135,12 @@
 | `start_date` | date | |
 | `end_date` | date | |
 | `total_budget` | numeric(12,2) | |
-| `kind` | text NOT NULL | DEFAULT `'general'`; CHECK: `general`, `viaje`. Clasificación informativa. D-023 |
+| `kind` | text NOT NULL | ‹recon 8-jul› mig 64; DEFAULT 'general'; CHECK: `general`, `viaje`. Los de tipo `viaje` se excluyen de ciertas vistas de gasto recurrente (`project_kind_view_exclusion`) |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
 **Proyectos activos:** rutina, maristas_adquisicion, maristas_equipamiento, capital-leo (mig 26), capital-biel (mig 26).  
-**RLS:** `auth.uid() IS NOT NULL`.  
-**D-023:** `kind` clasifica el proyecto (general/viaje) pero la exclusión de `v_spent_by_category_*` aplica a **todo** `project_id` sin distinción de `kind`.
+**RLS:** `auth.uid() IS NOT NULL`.
 
 ---
 
@@ -164,7 +160,7 @@
 | `nature` | text | CHECK: `fijo_recurrente`, `variable_recurrente`, `extraordinario`, `inversion`, `ahorro`, `transferencia` (mig 24) |
 | `paid_by_user_id` | uuid FK auth.users(id) | ON DELETE RESTRICT |
 | `titular` | text NOT NULL | CHECK: `eric`, `ana`, `compartido` |
-| `source` | text NOT NULL | DEFAULT 'manual'; CHECK: `manual`, `csv`, `psd2`, `gmail_parse`, `outlook_parse`, `backfill_extracto` (mig-70). **D-027:** `backfill_extracto` computa solo saldo; excluido de todas las vistas de gasto (source='psd2' obligatorio). |
+| `source` | text NOT NULL | DEFAULT 'manual'; CHECK: `manual`, `csv`, `psd2`, `gmail_parse`, `outlook_parse` (mig 39), `backfill_extracto` ‹recon 8-jul› (mig 70) |
 | `source_id` | text | |
 | `counterparty` | text | |
 | `is_reimbursable` | bool NOT NULL | mig 07; DEFAULT false |
@@ -174,8 +170,8 @@
 | `order_id` | uuid FK purchase_orders(id) | mig 38; ON DELETE SET NULL |
 | `is_direct_charge` | bool NOT NULL | mig 43; DEFAULT false; cargo de raíl sin pedido (decisión humana explícita) |
 | `superseded_by` | uuid FK transactions(id) NULL | mig 45; ON DELETE SET NULL; NULL=activa, uuid=duplicado de esa fila (excluida de vistas/sumas); reversible |
-| `dup_reviewed_at` | timestamptz NULL | mig-70; **D-028**: fecha de revisión humana de duplicado conocido. NULL=pendiente; IS NOT NULL=legitimado. fn_pending_review_dups() excluye grupos donde TODAS las filas tienen este campo NOT NULL. |
-| `dup_review_note` | text NULL | mig-70; **D-028**: nota de justificación del revisor (quién + fecha + motivo). |
+| `dup_reviewed_at` | timestamptz | ‹recon 8-jul› mig 60; sello temporal de revisión humana de un duplicado ambiguo (no auto) |
+| `dup_review_note` | text | ‹recon 8-jul› mig 60; nota de la decisión (ej. "tres billetes reales, no duplicado") |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
@@ -225,8 +221,7 @@
 | `updated_at` | timestamptz NOT NULL | |
 
 **RLS:** `auth.uid() IS NOT NULL`.  
-**GRANTs (mig 23 Fase 3):** `authenticated` tiene SELECT, INSERT, UPDATE, DELETE.  
-**P-024 (alerta `set_account_id`):** `set_account_id` solo debe enrutar a una subcuenta de tarjeta si esa tarjeta tiene un feed PSD2 granular propio. Los cargos de liquidación agregada (ej. `TARJ.CRDTO`) no son movimientos propios de la subcuenta — pertenecen al IBAN donde ocurren. Ver P-024.
+**GRANTs (mig 23 Fase 3):** `authenticated` tiene SELECT, INSERT, UPDATE, DELETE.
 
 ---
 
@@ -346,9 +341,9 @@
 
 ---
 
-### 2.12 · `public.stock_option_grants` — ⚠️ OBSOLETA, ELIMINADA
+### 2.12 · `public.stock_option_grants` — ELIMINADA (DROP aplicado 08-jul-2026, mig-72) ‹recon 8-jul›
 
-Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por `public.stock_options` (mig 16). **No referenciar en código nuevo.**
+Creada en mig-05. Sustituida por `public.stock_options` (mig-16, P-010). Tenía 0 filas. DROP ejecutado en mig-72 (08-jul-2026) con aprobación explícita de Eric (P-026). `SELECT to_regclass('public.stock_option_grants')` → NULL verificado. **No referenciar en código nuevo; usar `stock_options` + `stock_options_valued`.**
 
 ---
 
@@ -504,13 +499,11 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 | `condition_pct` | numeric(5,2) | DEFAULT 15.00 |
 | `notes` | text | |
 | `is_active` | bool NOT NULL | DEFAULT true |
-| `owner_role` | text NOT NULL | CHECK: `eric`, `ana` (mig 58); backfill 'eric' para los dos paquetes existentes. Eje de propiedad. |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
 
-**Datos:** Paquete 1 (1000 opciones, strike 11,60 €, vesting 2028), Paquete 2 (1000 opciones, strike 26,31 €, vesting 2029). Ambos `owner_role='eric'`.  
-**RLS (mig 58):** SELECT — `can_see_visibility('privada_'||owner_role)` (share-aware; reutiliza el helper de mig 56 mapeando owner_role a visibility tri-state). INSERT/UPDATE/DELETE — `auth.uid() IS NOT NULL AND owner_role = user_role()` (estricto owner-only). Reemplaza policy `stock_options_eric_only` (ALL, `auth.role()='authenticated'`).  
-**Nota:** `stock_options_valued` usa `security_invoker=true` → hereda el SELECT share-aware automáticamente; deja de fugar sin cambios en la vista.
+**Datos:** Paquete 1 (1000 opciones, strike 11,60 €, vesting 2028), Paquete 2 (1000 opciones, strike 26,31 €, vesting 2029).  
+**RLS:** `auth.role()='authenticated'` (compartido V1).
 
 ---
 
@@ -532,7 +525,7 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 
 **Índices:** `idx_manual_holdings_account`.  
 **Trigger:** `trg_manual_holdings_snapshot` AFTER INSERT/UPDATE → inserta en `manual_holdings_history`.  
-**RLS:** Grupo D desde mig 57 — SELECT: `can_read_account(account_id)` (share-aware); INSERT/UPDATE/DELETE: `can_see_account(account_id)` (estricto). Reemplaza policy permisiva `manual_holdings_authenticated` (ALL, `auth.role()='authenticated'`).  
+**RLS:** `auth.role()='authenticated'`.  
 **Uso:** Roboadvisor MyInvestor (P-001).
 
 ---
@@ -549,7 +542,7 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 
 **Constraint:** UNIQUE (manual_holding_id, snapshot_date).  
 **Índices:** `idx_mh_history_holding` on (manual_holding_id, snapshot_date DESC).  
-**RLS:** Grupo D desde mig 57 — navega `manual_holding_id → manual_holdings.account_id`. SELECT: `can_read_account(account_id)` (share-aware); INSERT/UPDATE/DELETE: `can_see_account(account_id)` (estricto). Reemplaza policy permisiva `mh_history_authenticated` (ALL).
+**RLS:** `auth.role()='authenticated'`.
 
 ---
 
@@ -615,7 +608,7 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 
 ---
 
-### 2.25 · `public.weekly_closures` *(mig 30 + mig 61 + mig 63)*
+### 2.25 · `public.weekly_closures` *(mig 30)*
 
 | Columna | Tipo | Notas |
 |---|---|---|
@@ -624,12 +617,10 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 | `week_end` | date NOT NULL | domingo = week_start + 6 |
 | `scope` | text NOT NULL | CHECK: `privada_eric`, `privada_ana`, `compartida` |
 | `total_spent` | numeric(12,2) NOT NULL | |
-| `total_budget` | numeric(12,2) | NULL — presupuesto diferido a módulo VIII, FY siguiente (D-022, T-037 DORMIDA) |
-| `semaforo` | text | NULL = histórico insuficiente (< 4 semanas). CHECK: `verde`, `ambar`, `rojo`. Fiable SOLO si `data_health='ok'` (D-020, D-022) |
-| `top_deviations` | jsonb NOT NULL | DEFAULT '[]'. Top 3 por (spent−habitual) DESC con delta>0. Campos: category_id, category_name, spent, habitual, delta (mig-63) |
-| `insights` | jsonb NOT NULL | DEFAULT '[]'. Escrito por `close_week.py` (LLM o templado). Vacío hasta primer cron |
-| `data_health` | text NOT NULL | DEFAULT 'ok'. CHECK: `ok`, `parcial`, `roto` (mig-61) |
-| `health_reason` | text | Causas activas concatenadas con ` · `. Texto parafraseado §4.5 (mig-63) |
+| `total_budget` | numeric(12,2) NOT NULL | |
+| `semaforo` | text NOT NULL | CHECK: `verde`, `ambar`, `rojo` |
+| `top_deviations` | jsonb NOT NULL | DEFAULT '[]' |
+| `insights` | jsonb NOT NULL | DEFAULT '[]' |
 | `closed_at` | timestamptz NOT NULL | DEFAULT now() |
 | `created_at` | timestamptz NOT NULL | |
 | `updated_at` | timestamptz NOT NULL | |
@@ -637,9 +628,7 @@ Creada en mig 05. **Eliminada en recovery 30-abr-2026** (P-010). Sustituida por 
 **Constraints:** `weekly_closures_unique_week_scope` UNIQUE (week_start, scope); `weekly_closures_week_end_check` CHECK (week_end = week_start + 6).  
 **Índices:** `weekly_closures_week_start_idx` (week_start DESC), `weekly_closures_scope_week_start_idx` (scope, week_start DESC).  
 **RLS:** Grupo C (mig 32 guard) con `scope` en vez de `visibility`.  
-**GRANTs:** SELECT, INSERT, UPDATE a `authenticated` (mig 30). Sin DELETE.  
-**D-020:** `data_health` es el gate de verdad. Consumidor (UI, job) lee salud antes que semaforo.  
-**D-022:** `semaforo=NULL` es estado temprano legítimo (< 4 semanas de histórico), no error. `total_budget` siempre NULL hasta FY siguiente.
+**GRANTs:** SELECT, INSERT, UPDATE a `authenticated` (mig 30). Sin DELETE.
 
 ---
 
@@ -781,57 +770,62 @@ A diferencia de `purchase_order_charges` (UNIQUE en `transaction_id`), aquí el 
 
 ---
 
-### 2.32 · `public.shares` *(mig 55)*
+### 2.32 · `public.shares` *(mig 55)* ‹recon 8-jul›
 
-Concesiones de visibilidad entre titulares. Asimétrica (una fila por dirección), revocable (`is_active`). El muro por defecto sigue siendo `accounts.visibility`; `shares` monta la relación encima. Granularidad: bucket entero (sin `account_id`). El helper `can_see_visibility()` (Mig 56) consumirá esta tabla.
+Modelo de **compartición explícita entre titulares** — operacionaliza el muro de privacidad del Dossier permitiendo que un titular conceda a otro visibilidad de un ámbito concreto. Base de `can_read_account()` / `can_see_visibility()`.
 
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | uuid PK | `gen_random_uuid()` |
-| `grantor_role` | text NOT NULL | CHECK: `eric`, `ana` — quien otorga |
-| `grantee_role` | text NOT NULL | CHECK: `eric`, `ana` — quien recibe |
-| `scope` | text NOT NULL | CHECK: `private_detail` (acceso Y/N al detalle privado), `aggregate` (reservado, no enforced por RLS de fila), `continuity` (sucesión pre-armada, nace inactiva) |
-| `is_active` | boolean NOT NULL | DEFAULT true; poner a false = revocar sin borrar |
-| `note` | text | Descripción opcional del acto de concesión |
+| `grantor_role` | text NOT NULL | CHECK: `eric`, `ana` — quién concede |
+| `grantee_role` | text NOT NULL | CHECK: `eric`, `ana` — quién recibe |
+| `scope` | text NOT NULL | CHECK: `private_detail`, `aggregate`, `continuity` |
+| `is_active` | bool NOT NULL | DEFAULT true |
+| `note` | text | |
 | `created_at` | timestamptz NOT NULL | DEFAULT now() |
-| `updated_at` | timestamptz NOT NULL | DEFAULT now(); trigger `trg_shares_updated_at` → `set_updated_at()` |
+| `updated_at` | timestamptz NOT NULL | DEFAULT now() |
 
-**Constraints:** `shares_no_self` CHECK (`grantor_role <> grantee_role`); `shares_unique_grant` UNIQUE (`grantor_role, grantee_role, scope`).  
-**RLS:** SELECT — si participas (`grantor_role = user_role()` OR `grantee_role = user_role()`); INSERT/UPDATE/DELETE — solo como grantor (`grantor_role = user_role()`). Guard `auth.uid() IS NOT NULL` en todas las policies.  
-**GRANT:** SELECT, INSERT, UPDATE, DELETE a `authenticated` (INV-6).  
-**Seed:** 2 filas de continuidad pre-armadas (`eric→ana` y `ana→eric`), ambas con `is_active=false`. Se activan con acto deliberado.
-
-### 2.33 · `public.job_runs` *(mig-69)*
-
-Registro de pulso por job. Una fila por ejecución. `status` refleja el resultado real: si algún ticker falla → `partial`; si todos fallan o hay 4xx → `error`; si todo va bien → `ok`. `detail` jsonb libre por job.
-
-| Columna | Tipo | Notas |
-|---|---|---|
-| `id` | uuid PK | `gen_random_uuid()` |
-| `job_name` | text NOT NULL | `sync_psd2`, `update_prices`, … |
-| `run_at` | timestamptz NOT NULL | `DEFAULT now()` |
-| `status` | text NOT NULL | CHECK: `ok`, `error`, `partial` |
-| `detail` | jsonb | Libre por job; e.g. `{inserted, failed, accounts_4xx, …}` |
-
-**Índice:** `(job_name, run_at DESC)`.  
-**RLS:** SELECT para `authenticated` (`auth.uid() IS NOT NULL`). Escritura exclusiva por `service_role` (BYPASSRLS; sin policy de escritura). INV-6: GRANT SELECT + policy ambos.
+**Constraints:** `shares_no_self` — grantor_role ≠ grantee_role.  
+**Semántica de `scope`:** `private_detail` = ver detalle de cuentas privadas del otro; `aggregate` = ver solo agregados; `continuity` = acceso de continuidad (plan sucesión del Dossier §07).  
+**RLS:** SELECT si eres grantor o grantee (`auth.uid() IS NOT NULL`); INSERT/UPDATE/DELETE solo el grantor (`grantor_role = user_role()`).  
+**GRANT:** `SELECT, INSERT, UPDATE, DELETE` a `authenticated`.
 
 ---
 
-### 2.34 · `public.balance_checks` *(mig-69)*
+### 2.33 · `public.job_runs` *(mig 69)* ‹recon 8-jul›
 
-Ancla de saldo diaria: saldo real del banco (Enable Banking) por cuenta PSD2. Se compara contra `account_balances_full.current_balance` en `/estado`. Un registro por (account_id, check_date); upsert en cada sync.
+Pulso de observabilidad: un registro por ejecución de cada job (`sync_psd2`, `update_prices`). `/estado` muestra el último run y su antigüedad.
 
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | uuid PK | `gen_random_uuid()` |
-| `account_id` | uuid NOT NULL FK → `accounts(id)` | |
-| `check_date` | date NOT NULL | Fecha del saldo (referenceDate de Enable Banking) |
-| `real_balance` | numeric NOT NULL | Saldo banco firmado en EUR |
-| `source` | text NOT NULL | DEFAULT `'enable_banking'` |
+| `job_name` | text NOT NULL | ej. `sync_psd2`, `update_prices` |
+| `run_at` | timestamptz NOT NULL | DEFAULT now() |
+| `status` | text NOT NULL | CHECK: `ok`, `error`, `partial` |
+| `detail` | jsonb | payload libre (contadores, errores) |
 
-**Constraints:** `UNIQUE(account_id, check_date)`.  
-**RLS:** SELECT con filtro de visibilidad: `accounts.visibility = 'privada_' || user_role() OR = 'compartida'` — impide que Eric vea BBVA y Ana Kutxabank. Escritura solo `service_role`. INV-6: GRANT SELECT + policy ambos.
+**RLS:** SELECT para authenticated (`auth.uid() IS NOT NULL`). Escritura solo `service_role` (los jobs corren con service_role).  
+**GRANT:** `SELECT` a `authenticated`; resto a `service_role`.  
+**Umbrales /estado:** psd2 rojo >36h · precios rojo >4 días.  
+**Pendiente (horizonte):** falta pulso de los parsers Gmail/Outlook.
+
+---
+
+### 2.34 · `public.balance_checks` *(mig 69)* ‹recon 8-jul›
+
+Ancla de saldo real: en cada sync se guarda el saldo contable que reporta el banco (Enable Banking). `/estado` compara real vs. calculado; verde si `|delta| ≤ 0,01`.
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | uuid PK | `gen_random_uuid()` |
+| `account_id` | uuid NOT NULL | FK lógica a accounts(id) |
+| `check_date` | date NOT NULL | |
+| `real_balance` | numeric NOT NULL | saldo contable del extracto/banco |
+| `source` | text NOT NULL | DEFAULT `enable_banking` |
+
+**RLS:** SELECT por visibilidad de la cuenta (`visibility = 'privada_'||user_role() OR 'compartida'`). Escritura solo `service_role`.  
+**GRANT:** `SELECT` a `authenticated`; resto a `service_role`.  
+**⚠ Deuda ‹recon 8-jul› (T-xxx sugerida):** la policy `balance_checks_select` **NO lleva el guard `auth.uid() IS NOT NULL`** que mig-32 estandarizó en el resto de tablas por-visibilidad. Hoy es inerte porque `anon` ya no tiene GRANT sobre la tabla (mig-71), pero es defensa de una sola capa: si una futura migración reintroduce GRANT a anon, esta policy filtraría las filas de cuentas `compartida`. Alinear con el patrón mig-32.
 
 ---
 
@@ -845,7 +839,7 @@ Ancla de saldo diaria: saldo real del banco (Enable Banking) por cuenta PSD2. Se
 
 ---
 
-### 3.2 · `public.account_balances_full` *(mig 11 + 14 + 17 + 20 + mig-67)*
+### 3.2 · `public.account_balances_full` *(mig 11 + 14 + 17 + 20)*
 
 **Columnas de salida (estado final, P-009 verificado):**
 
@@ -860,17 +854,14 @@ Ancla de saldo diaria: saldo real del banco (Enable Banking) por cuenta PSD2. Se
 | `initial_balance` | numeric(12,2) | |
 | `is_active` | bool | **mig 17** |
 | `sort_order` | int | **mig 17** |
-| `transactions_sum` | numeric(12,2) | COALESCE(SUM(txns.amount), 0) — suma bruta informativa, sin filtro superseded_by |
+| `transactions_sum` | numeric(12,2) | COALESCE(SUM(txns.amount), 0) |
 | `holdings_value_eur` | numeric(20,8) | SUM(holdings_valued) + SUM(manual_holdings is_active) **(mig 20)** |
 | `current_balance` | numeric(12,2) | Ver lógica abajo |
 
-**Lógica current_balance (mig-67 D-025):**
-- `broker` / `investment`: `initial_balance + transactions_sum + holdings_value_eur` (sin cambios)
-- `card` + `card_mode='debit'` **(mig-67)**: `0` — tarjeta débito, no portadora de saldo; el saldo vive en el IBAN padre (D-025)
-- `card` + `card_mode='credit'` (P-002, sin cambios): `-1 * (initial_balance + transactions_sum)` — deuda como positivo
-- resto (`bank`/`cash`/…) **(mig-67)**: `initial_balance + SUM(propios activos, superseded_by IS NULL) + SUM(tarjetas débito vinculadas activas, superseded_by IS NULL)` — cuentas sin tarjeta: segundo sumando = 0 (neutro)
-
-**Nota P-002:** P-002 queda condicionado a `card_mode='credit'`. Las tarjetas débito no generan saldo ni deuda; su gasto ya está contabilizado en el IBAN padre.
+**Lógica current_balance:**
+- `broker` / `investment`: `initial_balance + transactions_sum + holdings_value_eur`
+- `card` (mig 14, P-002): `-1 * (initial_balance + transactions_sum)` — deuda como positivo
+- resto: `initial_balance + transactions_sum`
 
 **Security_invoker:** true.
 
@@ -956,7 +947,7 @@ Todas las columnas de `holdings` más:
 
 ---
 
-### 3.7 · `public.v_spent_by_category_month` *(mig 29 + T-019 mig 20260530000029 + D-023 mig-64)*
+### 3.7 · `public.v_spent_by_category_month` *(mig 29 + T-019 mig 20260530000029)*
 
 **Columnas:** `year` int, `month` int, `category_id` uuid, `visibility` text, `spent` numeric(12,2), `txn_count` int.
 
@@ -964,30 +955,17 @@ Todas las columnas de `holdings` más:
 - Branch A (con splits): suma `ABS(splits.amount)` donde amount < 0
 - Branch B (sin splits): suma `ABS(txn.amount)` donde category_id IS NOT NULL AND amount < 0
 - **Filtro T-019:** `(t.nature IS NULL OR t.nature NOT IN ('transferencia', 'inversion'))` en ambos branches — excluye transferencia e inversión, **preserva NULL** (pendientes de clasificación).
-- **Filtro D-023:** `AND t.project_id IS NULL` en ambos branches — gasto de proyecto fuera del basis de categoría (vive en el sobre del proyecto, no como gasto de categoría).
-- **Filtro T-036:** `AND t.superseded_by IS NULL` — excluye duplicados PSD2 neutralizados.
-- **Filtro D-027 (mig-70):** `AND t.source = 'psd2'` — excluye `backfill_extracto`, `manual`, `csv` y cualquier fuente no-PSD2. **INTENCIONAL**: el backfill de extractos pre-PSD2 computa solo saldo, no baseline de hábitos. Cero-impacto en datos históricos (todos los registros vigentes en 2026-07-05 eran source='psd2').
 
 **Security_invoker:** true.
 
 ---
 
-### 3.8 · `public.v_spent_by_category_week` *(mig 29 + D-023 mig-64)*
+### 3.8 · `public.v_spent_by_category_week` *(mig 29)*
 
 **Columnas:** `week_start` date, `category_id` uuid, `visibility` text, `spent` numeric(12,2), `txn_count` int.
 
-**Filtro:** Mismo que `v_spent_by_category_month` (nature, superseded_by, project_id IS NULL D-023, **source='psd2' D-027**). Agrupa por `date_trunc('week', date)` (lunes ISO). Refleja el gasto real PSD2 — fuente de `total_spent` en `weekly_closures`. El semáforo ya NO la usa directamente (D-024).  
+**Filtro:** Mismo que `v_spent_by_category_month`. Agrupa por `date_trunc('week', date)` (lunes ISO).  
 **Security_invoker:** true.
-
----
-
-### 3.8b · `public.v_discretionary_spend_by_category_week` *(mig-65 D-024)*
-
-**Columnas:** `week_start` date, `category_id` uuid, `visibility` text, `spent` numeric(12,2), `txn_count` int.
-
-**Filtro D-024+D-027:** Igual que `v_spent_by_category_week` (incluyendo `source='psd2'`) **más** `AND t.nature IS DISTINCT FROM 'fijo_recurrente'`. NULL se incluye (pendiente de clasificar = discrecional por defecto). `extraordinario` se incluye. `fijo_recurrente` excluido del basis del semáforo — es un compromiso, no una desviación.  
-**Consumers:** `fn_close_week` para `baseline_weeks`, `total_habitual`, `disc_spent_for_ratio`, `semaforo`, `top_deviations`. El INNER JOIN en ratio y top_deviations excluye automáticamente categorías sin histórico de 8 semanas.  
-**Security_invoker:** true. `GRANT SELECT TO authenticated`.
 
 ---
 
@@ -1069,67 +1047,45 @@ Vista de conciliación de nóminas Nordex a nivel mes. Cruza `incomes` (source=`
 
 ---
 
-### 3.15 · `public.v_cuentas_composicion` *(mig 53)*
+### 3.15 · `public.v_cuentas_composicion` *(mig 53)* ‹recon 8-jul›
 
-Agrega el patrimonio por `(titular × segmento de liquidez)`. Alimenta el donut y la espina por titular del módulo /cuentas.
+**Base del futuro Front 2 (barra Pictet · lado "real").** Composición del patrimonio líquido por titular y clase de activo. **No incluye inmuebles ni stock options** (patrimonio contingente/no líquido, excluido por diseño).
 
-**Columnas:**
+**Cinco segmentos (`orden` fijo):** `Efectivo` (1) · `Renta variable + ETF` (2) · `Fondos indexados` (3) · `Roboadvisor` (4) · `Cripto` (5).
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `titular` | text | `eric` / `ana` / `comun` / `leo` / `biel` |
-| `segmento` | text | `Efectivo` / `Renta variable + ETF` / `Fondos indexados` / `Roboadvisor` / `Cripto` / `Otros` |
-| `orden` | int | Orden de visualización: 1 Efectivo, 2 RV+ETF, 3 FI, 4 Roboadvisor, 5 Cripto, 9 Otros |
-| `valor` | numeric | Suma de saldos/valoraciones en EUR para ese (titular, segmento) |
+| `titular` | text | eric / ana / comun / leo / biel |
+| `segmento` | text | una de las 5 clases |
+| `orden` | int | orden de apilado (1–5) |
+| `valor` | numeric | suma en EUR del segmento para ese titular |
 
-**Fuentes:** `accounts` + `account_balances_full` (Efectivo) · `holdings_valued` (cotizados) · `manual_holdings` (Roboadvisor).  
-**Filtro:** `is_active = true` en todas las tablas base.  
-**Security_invoker:** true — la RLS de `accounts` filtra por `visibility` según el usuario invocante; Eric no ve cuentas de Ana y viceversa.  
-**GRANT:** SELECT a `authenticated`.
+**Fuentes UNION:** `Efectivo` = `account_balances_full.current_balance` de cuentas type ∈ (bank, cash, tesoreria_tae); `RV+ETF/Indexados/Cripto` = `holdings_valued.current_value_eur` mapeando `asset_type` (accion/etf→RV+ETF, fondo_indexado→Indexados, cripto→Cripto); `Roboadvisor` = `manual_holdings.current_value_eur`.  
+**⚠ Agrupa por `titular`** — para composición combinada del hogar hay que sumar sobre titular en la capa que consuma la vista. La D-serie de asignación objetivo debe usar **estos mismos 5 segmentos**.  
+**Security_invoker:** true (verificar en el próximo pase; el resto de las 18 vistas lo son).
 
 ---
 
-### 3.16 · `public.v_cuentas_detalle` *(mig 54)*
+### 3.16 · `public.v_cuentas_detalle` *(mig 54)* ‹recon 8-jul›
 
-Como `v_cuentas_composicion` pero a nivel de **cuenta individual** (`account_id`). Alimenta el drill-down del módulo /cuentas (U4).
+Igual que `v_cuentas_composicion` pero a grano de cuenta individual (añade `account_id`, `name`, `institution`, `visibility`). Alimenta el drill-down de `/cuentas`.  
+**Security_invoker:** true (verificar).
 
-**Columnas:**
+---
 
-| Columna | Tipo | Descripción |
-|---|---|---|
-| `account_id` | uuid | Identificador de la cuenta |
-| `name` | text | Nombre de la cuenta |
-| `institution` | text | Institución financiera |
-| `visibility` | text | `privada_eric` / `privada_ana` / `compartida` |
-| `titular` | text | `eric` / `ana` / `comun` / `leo` / `biel` |
-| `segmento` | text | `Efectivo` / `Renta variable + ETF` / `Fondos indexados` / `Roboadvisor` / `Cripto` / `Otros` |
-| `orden` | int | Orden: 1 Efectivo, 2 RV+ETF, 3 FI, 4 Roboadvisor, 5 Cripto, 9 Otros |
-| `valor` | numeric | Suma en EUR para esa (cuenta, segmento) |
+### 3.17 · `public.v_discretionary_spend_by_category_week` *(mig 65)* ‹recon 8-jul›
 
-**Fuentes:** `accounts` + `account_balances_full` (Efectivo) · `holdings_valued` (cotizados) · `manual_holdings` (Roboadvisor).  
-**Filtro:** `is_active = true` en todas las tablas base.  
-**Security_invoker:** true — hereda RLS del usuario invocante.  
-**GRANT:** SELECT a `authenticated`.  
-**Verificado (12-jun-2026):** `SUM(valor) GROUP BY (titular, segmento)` = `v_cuentas_composicion` para todos los titulares, diff = 0.
+Gasto **discrecional** semanal por categoría y visibilidad. Filtra: `amount < 0`, `nature ∉ (transferencia, inversion)`, `nature ≠ fijo_recurrente`, `project_id IS NULL`, `superseded_by IS NULL`, `source = 'psd2'`. Cubre tanto splits como transacciones sin split. Base de `fn_close_week` (semáforo discrecional).  
+**Columnas:** `week_start` date, `category_id` uuid, `visibility` text, `spent` numeric, `txn_count` int.  
+**Security_invoker:** true (verificar).
 
-### 3.X · `public.v_last_closure_health` *(mig 61)*
+---
 
-Por scope visible al usuario: el último cierre semanal en `weekly_closures`.
+### 3.18 · `public.v_last_closure_health` *(mig 61)* ‹recon 8-jul›
 
-| Columna | Tipo | Descripción |
-|---|---|---|
-| `scope` | text | `privada_eric`, `privada_ana`, `compartida` |
-| `week_start` | date | lunes ISO del último cierre |
-| `week_end` | date | domingo |
-| `semaforo` | text | `verde`/`ambar`/`rojo`. Solo fiable si `data_health='ok'` |
-| `data_health` | text | `ok`/`parcial`/`roto` |
-| `health_reason` | text | Causas activas (null si ok) |
-| `closed_at` | timestamptz | Momento del último cierre |
-| `recent_bad_count` | bigint | Cierres `parcial`/`roto` en las últimas 12 semanas (84 días) |
-
-**Security_invoker:** true — el SELECT de `weekly_closures` hereda el RLS Grupo C. Eric ve `privada_eric` + `compartida`; Ana ve `privada_ana` + `compartida`.  
-**GRANT:** SELECT a `authenticated`.  
-**D-020:** consumidor gatea por `data_health` antes de renderizar `semaforo`.
+Salud del último cierre semanal por scope. Devuelve el `weekly_closures` más reciente por scope + `recent_bad_count` = nº de cierres con `data_health ∈ (parcial, roto)` en las últimas 12 semanas (84 días). Alimenta el criterio de salida hacia Mercadona (ancla verde 2 semanas).  
+**Columnas:** `scope`, `week_start`, `week_end`, `semaforo`, `data_health`, `health_reason`, `closed_at`, `recent_bad_count`.  
+**Security_invoker:** true (verificar).
 
 ---
 
@@ -1154,9 +1110,9 @@ Por scope visible al usuario: el último cierre semanal en `weekly_closures`.
 | `holdings` | ✓ RLS | ✓ RLS | ✓ RLS | ✓ RLS | Grupo D |
 | `holding_prices` | ✓ TRUE | — | — | — | Público |
 | `currency_rates` | ✓ TRUE | — | — | — | Público |
-| `stock_options` | ✓ RLS (share-aware) | ✓ RLS owner-only | ✓ RLS owner-only | ✓ RLS owner-only | Mig 58; can_see_visibility('privada_'||owner_role) |
-| `manual_holdings` | ✓ RLS (share-aware) | ✓ RLS | ✓ RLS | ✓ RLS | Grupo D desde mig 57; worker escribe por service_role |
-| `manual_holdings_history` | ✓ RLS (share-aware) | ✓ RLS | ✓ RLS | ✓ RLS | Grupo D desde mig 57; navega a account via manual_holdings |
+| `stock_options` | ✓ | ✓ | ✓ | — | V1 compartido |
+| `manual_holdings` | ✓ | ✓ | ✓ | — | |
+| `manual_holdings_history` | ✓ | ✓ | ✓ | — | |
 | `patrimonio_snapshots` | ✓ RLS | ✓ RLS | ✓ RLS | — | |
 | `bank_connections` | ✓ RLS | ✓ mig 23 | ✓ mig 23 | ✓ mig 24 | Grupo A |
 | `bank_account_links` | ✓ RLS | ✓ mig 23 | ✓ mig 23 | ✓ mig 24 | Grupo D |
@@ -1166,11 +1122,9 @@ Por scope visible al usuario: el último cierre semanal en `weekly_closures`.
 | `purchase_order_lines` | ✓ RLS | ✓ mig 36 | ✓ mig 36 | — | via can_see_order() |
 | `purchase_order_charges` | ✓ RLS | ✓ mig 37 | ✓ mig 37 | ✓ mig 42+44 | via can_see_transaction() |
 | `income_charges` | ✓ mig 50 | ✓ mig 50 | ✓ mig 50 | ✓ mig 50 | can_see_transaction() + incomes.user_id |
-| `shares` | ✓ mig 55 | ✓ mig 55 | ✓ mig 55 | ✓ mig 55 | SELECT si participas; INSERT/UPDATE/DELETE solo como grantor |
-| `job_runs` | ✓ mig-69 | — | — | — | Escritura solo service_role (BYPASSRLS) |
-| `balance_checks` | ✓ mig-69 | — | — | — | Escritura solo service_role; SELECT filtra visibilidad de accounts |
-
-> **Nota anon (mig-71):** `anon` no tiene ningún privilegio en el schema `public`. Ninguna tabla, vista, secuencia ni función es accesible para peticiones no autenticadas a PostgREST. Verificado: `SELECT count(*) FROM information_schema.role_table_grants WHERE grantee='anon' AND table_schema='public'` → 0 (P-027).
+| `shares` | ✓ mig 55 | ✓ mig 55 | ✓ mig 55 | ✓ mig 55 | grantor/grantee = user_role(); write solo grantor ‹recon 8-jul› |
+| `job_runs` | ✓ mig 69 | — | — | — | write solo service_role ‹recon 8-jul› |
+| `balance_checks` | ✓ mig 69 | — | — | — | write solo service_role; ⚠ policy sin guard auth.uid ‹recon 8-jul› |
 
 ---
 
@@ -1236,27 +1190,29 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260605000048 | `v_median_income_3m_nomina_mensual.sql` | v_median_income_3m filtra type='nomina_mensual' (excluye bonus/paga_extra) |
 | 20260606000049 | `incomes_source_nordex_payslip.sql` | incomes.source CHECK ampliado: añade 'nordex_payslip' para worker parse_nominas |
 | 20260607000050 | `income_charges.sql` | income_charges M:N (UNIQUE income_id+transaction_id) + v_income_reconciliation; RLS+GRANT las 4 ops |
-| 20260610000051 | `fix_transferencias_nature_rules.sql` | mig-51 PARCHE DATOS (solo DML, sin DDL) — 6 txns Leo/Biel (Feb+Abr) → nature='transferencia'; regla Ana (fijo_recurrente→transferencia), regla Biel (inversion→transferencia + match_value robusto), regla Leo nueva (transferencia, categoría 'Aportación cuenta de ahorro'). Idempotente. |
-| 20260612000052 | `titular_accounts.sql` | mig-52: ADD COLUMN `titular` text NOT NULL CHECK(eric\|ana\|comun\|leo\|biel) en `accounts`. Backfill por nombre (Leo/Biel) y visibility (privada_eric→eric, privada_ana→ana, compartida→comun). Eje de propiedad/destino; distinto de `visibility` (muro de privacidad). Base de la espina por titular y futura sucesión. |
-| 20260612000053 | `v_cuentas_composicion.sql` | mig-53: CREATE VIEW `v_cuentas_composicion` WITH (security_invoker=true) — agrega patrimonio por (titular × segmento: Efectivo/RV+ETF/FI/Roboadvisor/Cripto). Fuentes: account_balances_full + holdings_valued + manual_holdings. GRANT SELECT a authenticated. Alimenta donut y espina por titular de /cuentas. |
-| 20260612000054 | `v_cuentas_detalle.sql` | mig-54: CREATE VIEW `v_cuentas_detalle` WITH (security_invoker=true) — igual que v_cuentas_composicion pero a nivel de cuenta individual (account_id). Añade name, institution, visibility. Alimenta drill-down U4 de /cuentas. Verificado: SUM = v_cuentas_composicion para todos los titulares. |
-| 20260613000055 | `shares.sql` | B2: tabla `shares` (compartición asimétrica + continuidad pre-armada). RLS: SELECT si participas; INSERT/UPDATE/DELETE solo como grantor. Seed 2 filas continuidad inactivas (eric↔ana). |
-| 20260613000056 | `can_see_visibility.sql` | B2: `can_see_visibility(text)` + `can_read_account(uuid)` share-aware. Repunta SELECT de `accounts`, `holdings`, `transactions`. Escritura (can_see_account) intacta. |
-| 20260613000057 | `rls_manual_holdings.sql` | B2: cierra fuga manual_holdings + _history. De ALL permisivo a Grupo D: SELECT can_read_account; INSERT/UPDATE/DELETE can_see_account. |
-| 20260613000058 | `rls_stock_options.sql` | B2 final: añade owner_role (NOT NULL, backfill 'eric'); RLS por operación: SELECT can_see_visibility share-aware, escritura owner-only. stock_options_valued hereda automáticamente. |
-| 20260613000059 | `fn_supersede_pending_booked.sql` | fn_supersede_pending_booked(): auto-dedupe PENDING(h_)→BOOKED(er_) por content-match. Llamada por sync_psd2.py end-of-run en LIVE. |
-| 20260704000066 | `fn_supersede_pending_booked_v2.sql` | P-023: reescritura con descripción normalizada. norm(x)=trim(regexp_replace(lower(replace(x,':','')),'\s+',' ','g')). Empareja por igualdad o contención de subcadena (cubre ":" Santander + duplicación Kutxabank). 1:1 vía ROW_NUMBER ambos lados. Hereda category_id/project_id/nature/is_reimbursable de h_ a er_ si NULL. Backfill 04-jul: 5 pares neutralizados, −2.025,66 € deduplicados. T-040: limitación date idéntica. |
-| 20260704000067 | `accounts_card_mode_debit.sql` | D-025: accounts.card_mode ('credit'\|'debit') + constraints de coherencia. Backfill: Tarjeta Santander Ana/Eric → debit; resto → credit. account_balances_full: card+debit=0; card+credit=P-002 intacto; bank/cash=initial_balance+propios_activos+tarjetas_débito_activas. Verificación: Santander común = 4.322,81 € (04-jul-2026). |
-| 20260705000068 | `fix_tarj_crdto_kutxabank.sql` | P-024 data fix: desactiva rule#d03dbac0 (TARJ.CRDTO→card subaccount); mueve 5 liquidaciones TARJ.CRDTO a Kutxabank IBAN; Tarjeta Kutxabank Eric → initial_balance=0, is_active=false. Kutxabank = 6.927,10 € verificado. |
-| 20260613000060 | `fn_pending_review_dups.sql` | fn_pending_review_dups(): lista duplicados PSD2 ambiguos para revisión humana. INVOKER, respeta RLS B2. Llamada desde /estado. |
-| 20260628000061 | `weekly_closures_health.sql` | (1) ALTER weekly_closures: ADD data_health (ok/parcial/roto) + health_reason. (2) fn_close_week(date) SECURITY DEFINER: total_spent, total_budget prorrateado (T-037), health gate (pendientes/psd2/dups/budget/actividad), semaforo, top_deviations, UPSERT. GRANT service_role. (3) v_last_closure_health INVOKER + GRANT authenticated. D-020. |
-| 20260628000062 | `revoke_public_security_definer.sql` | P-022: REVOKE EXECUTE FROM PUBLIC en los 3 writers SECURITY DEFINER: fn_close_week(date), capture_patrimonio_snapshot(), fn_supersede_pending_booked(). GRANT service_role en capture y fn_supersede. authenticated conserva capture (mig-21). Helpers can_*/user_role intactos (→T-039). |
-| 20260629000063 | `fn_close_week_vs_habitual.sql` | D-022: reescritura fn_close_week — semáforo vs habitual (mediana 8 semanas por categoría). ALTER TABLE DROP NOT NULL en semaforo y total_budget. total_budget=NULL (presupuesto diferido, T-037 DORMIDA). semaforo=NULL si baseline < 4 semanas. top_deviations ahora contiene spent/habitual/delta (no budget). Gate de salud sin budget_cobertura. health_reason parafraseado §4.5. Fix: array_append() en v_health_parts (evita ERROR 22P02 que causaba `|| 'literal'` con tipo unknown). Re-verifica REVOKE FROM PUBLIC + GRANT service_role (P-022). |
-| 20260629000064 | `project_kind_view_exclusion.sql` | D-023: (1) projects.kind text NOT NULL DEFAULT 'general' CHECK (general, viaje) — clasificación informativa del proyecto. (2) v_spent_by_category_week: añade `AND t.project_id IS NULL` en ambas ramas (splits + directa). (3) v_spent_by_category_month: ídem. El gasto con project_id vive en el sobre del proyecto, no como gasto de categoría; cambia sustractivo, no rompe shape de ningún consumidor (fn_close_week, v_category_budget_status, v_median_spend_3m_by_category). |
-| 20260701000065 | `fn_close_week_discrecional.sql` | D-024: (1) Nueva vista v_discretionary_spend_by_category_week = v_spent_by_category_week + AND t.nature IS DISTINCT FROM 'fijo_recurrente'. GRANT SELECT authenticated. (2) fn_close_week: total_spent sigue v_spent_by_category_week (gasto real); semaforo/total_habitual/top_deviations pasan a v_discretionary_spend_by_category_week. INNER JOIN en ratio y top_deviations → cats sin histórico discrecional excluidas del juicio. v_disc_spent_for_ratio = spent discrecional solo de cats con habitual. P-022 re-verificado (REVOKE + GRANT service_role). |
-| 20260705000069 | `observability_job_runs_balance_checks.sql` | D-026: `job_runs` (pulso de job: job_name, status ok/error/partial, detail jsonb) + `balance_checks` (ancla de saldo real por cuenta PSD2: account_id, check_date, real_balance). RLS + GRANT SELECT authenticated en ambas (INV-6). Escritura solo service_role (BYPASSRLS). Índice (job_name, run_at DESC) en job_runs. |
-| 20260705000070 | `reconciliacion_backfill_deuda_tecnica.sql` | D-027+D-028: (1) Extiende transactions.source CHECK con 'backfill_extracto'. (2) ADD COLUMN dup_reviewed_at timestamptz + dup_review_note text en transactions. (3) Vistas de gasto (v_spent_by_category_week/month + v_discretionary) añaden AND source='psd2' — exclusión intencional de backfill en analytics. (4) fn_pending_review_dups + fn_close_week inline dup check: excluye grupos totalmente revisados. (5) Marca 9 filas de 3 grupos históricos como revisados. (6) Backfill 22 txns pre-PSD2 (14 Santander + 8 Kutxabank), source=backfill_extracto. (7) Re-ancla initial_balance (Santander 803.77→1047.35, Kutxabank 2151.66→31703.54). (8) Liabilities datos reales (Préstamo coche 26549.29/388.93, Préstamo máster 3010.55/237.72). (9) Holdings ISIN BRK.B+NVDA NULL→reales. (10) DELETE holding_prices huérfanas (BRK.B/NVDA isin=NULL). |
-| 20260706000071 | `revoke_anon_public.sql` | P-027: hardening — REVOKE ALL ON ALL TABLES/SEQUENCES/FUNCTIONS IN SCHEMA public FROM anon + ALTER DEFAULT PRIVILEGES FOR ROLE postgres REVOKE ALL ON TABLES/SEQUENCES/FUNCTIONS FROM anon. anon=0 grants verificado; default privileges tablas = {authenticated=r/postgres, service_role=arwdDxtm/postgres}. |
+| 20260610000051 | `fix_transferencias_nature_rules.sql` | Corrige reglas de nature='transferencia' |
+| 20260612000052 | `titular_accounts.sql` | `accounts.titular` (eric/ana/comun/leo/biel) |
+| 20260612000053 | `v_cuentas_composicion.sql` | Vista composición por titular × 5 clases de activo (base Front 2 Pictet) |
+| 20260612000054 | `v_cuentas_detalle.sql` | Vista detalle por cuenta × clase |
+| 20260613000055 | `shares.sql` | Tabla `shares` (compartición explícita entre titulares) |
+| 20260613000056 | `can_see_visibility.sql` | `can_read_account()`, `can_see_visibility()` (muro + shares) |
+| 20260613000057 | `rls_manual_holdings.sql` | RLS revisada en manual_holdings |
+| 20260613000058 | `rls_stock_options.sql` | RLS revisada en stock_options |
+| 20260613000059 | `fn_supersede_pending_booked.sql` | Deduplicador PSD2 (v1) |
+| 20260613000060 | `fn_pending_review_dups.sql` | `transactions.dup_reviewed_at/dup_review_note` + fn_pending_review_dups() |
+| 20260628000061 | `weekly_closures_health.sql` | `data_health`/`health_reason` en weekly_closures + v_last_closure_health |
+| 20260628000062 | `revoke_public_security_definer.sql` | REVOKE de EXECUTE público en funciones security_definer |
+| 20260629000063 | `fn_close_week_vs_habitual.sql` | fn_close_week con semáforo vs. mediana habitual |
+| 20260629000064 | `project_kind_view_exclusion.sql` | `projects.kind` (general/viaje) + exclusión en vistas |
+| 20260701000065 | `fn_close_week_discrecional.sql` | v_discretionary_spend_by_category_week + fn_close_week discrecional |
+| 20260704000066 | `fn_supersede_pending_booked_v2.sql` | Deduplicador v2 (descripción normalizada, 1:1 estricto) |
+| 20260704000067 | `accounts_card_mode_debit.sql` | `accounts.card_mode` (credit/debit); account_balances_full absorbe débito en IBAN padre |
+| 20260705000068 | `fix_tarj_crdto_kutxabank.sql` | P-024: reasigna liquidaciones TARJ.CRDTO al IBAN; subcuenta Kutxa desactivada |
+| 20260705000069 | `observability_job_runs_balance_checks.sql` | Tablas `job_runs` + `balance_checks` + RLS/GRANT |
+| 20260705000070 | `reconciliacion_backfill_deuda_tecnica.sql` | Backfill 22 movs pre-PSD2 (source='backfill_extracto', D-027) + filtro source='psd2' en vistas de gasto |
+| 20260706000071 | `revoke_anon_public.sql` | REVOKE de anon en schema public + ALTER DEFAULT PRIVILEGES (mig-71) |
+| 20260706115434 | `revoke_anon_public` | ⚠️ **DUPLICADO en ledger** ‹recon 8-jul› — mismo nombre, sin archivo `.sql` pareja conocido. REVOKE idempotente (sin daño), pero divergencia git↔ledger. Ver §6. |
+| 20260708000072 | `drop_stock_option_grants.sql` | A1: DROP TABLE IF EXISTS public.stock_option_grants — tabla fantasma (0 filas) creada en mig-05, sustituida por stock_options en mig-16 (P-010). DROP aprobado Eric 08-jul-2026. to_regclass → NULL verificado. |
 
 ---
 
@@ -1271,6 +1227,14 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 - **P-006 (activo):** NDX1.DE en holding_prices sin holding asociado — necesario para stock_options_valued. Filas "huérfanas" esperadas.
 - **P-008 / D-001:** holding_prices acepta ticker=NULL AND isin=NULL. CHECK constraint pendiente (baja prioridad).
 - **`supabase db dump --linked`** requiere Docker. Para volcado fiel: iniciar Docker y ejecutar `npx supabase db dump --schema public --linked > docs/schema_dump.sql` antes del siguiente release.
-- **P-022 (permanente):** Postgres concede `EXECUTE` a `PUBLIC` por defecto en toda función nueva. PostgREST expone `public` a `anon`. Regla: en cada función `SECURITY DEFINER` nueva, incluir inmediatamente `REVOKE EXECUTE FROM PUBLIC` + `GRANT EXECUTE TO <rol>`. Helpers INVOKER de RLS (can_*, user_role): conservar siempre `authenticated`; endurecer `anon` en T-039. Verificar con `has_function_privilege('anon', oid, 'EXECUTE')` (P-021).
-- **P-027 (permanente):** `anon` no tiene privilegios en el schema `public` (mig-71). Default privileges revocados para `postgres` → objetos futuros nacen cerrados para `anon`. Login obligatorio para toda lectura. En proyectos Supabase nuevos, incluir esta revocación en la primera migración de hardening.
-- **mig-51 (10-jun-2026):** parche de datos exclusivamente (UPDATE/INSERT en `transactions` y `classification_rules`). No altera ninguna definición de tabla, vista, RLS ni GRANT — §2/§3/§4 permanecen válidos. Idempotente (guards `IS DISTINCT FROM`, `WHERE NOT EXISTS`).
+
+### 6.1 · Anomalías abiertas (reconciliación 8-jul-2026)
+
+- **A1 · `stock_option_grants` residual — RESUELTA ‹mig-72, 08-jul-2026›:** DROP aplicado con aprobación Eric. `SELECT to_regclass('public.stock_option_grants')` → NULL confirmado. §2.12 actualizado.
+- **A2 · `revoke_anon_public` duplicada en ledger:** dos entradas (`20260706000071` y `20260706115434`) con nombre idéntico. Probable doble aplicación (archivo + re-apply vía MCP con timestamp autogenerado). REVOKE es idempotente → sin daño de datos, pero el ledger tiene una entrada sin `.sql` pareja en `migrations/`: un `db push` la creería sincronizada y un rebuild desde archivos no la reproduciría. **Resolver en repo** (confirmar qué archivos existen; documentar o normalizar). Territorio P-015.
+- **A3 · `balance_checks_select` sin guard:** única tabla por-visibilidad cuya policy SELECT no incluye `auth.uid() IS NOT NULL` (el estándar mig-32). Inerte hoy (anon sin GRANT tras mig-71), pero defensa de una sola capa. Alinear con mig-32.
+- **A4 · `can_read_account` vs `can_see_account` — RESUELTO ‹recon 8-jul›:** no es duplicación ni código muerto, sino **split lectura/escritura** del modelo `shares` (mig 56). `can_read_account` = gate de lectura shares-aware (policies SELECT de holdings/manual_holdings/mh_history/transactions); `can_see_account` = gate de escritura owner-only (policies I/U/D + las 4 de bank_account_links). Ambas vivas y necesarias. Único fleco menor: `bank_account_links_select` usa el gate de escritura para leer (no honra shares) — verificar si es intencional.
+
+### 6.2 · Método de esta reconciliación
+
+Generada por introspección directa vía Supabase MCP (`pg_catalog`/`information_schema` + `pg_get_viewdef`/`pg_get_function_result` + `pg_policies` + `role_table_grants`), no desde los archivos de migración. Es foto del **estado real de BBDD** a 8-jul-2026, que es lo que P-009 exige verificar. Los cuerpos completos de vistas/funciones nuevas no se transcriben aquí (viven en sus `.sql`); este doc registra contrato, columnas, RLS y GRANT.
