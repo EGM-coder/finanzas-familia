@@ -1213,6 +1213,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260706000071 | `revoke_anon_public.sql` | REVOKE de anon en schema public + ALTER DEFAULT PRIVILEGES (mig-71) |
 | 20260706115434 | `revoke_anon_public` | ⚠️ **DUPLICADO en ledger** ‹recon 8-jul› — mismo nombre, sin archivo `.sql` pareja conocido. REVOKE idempotente (sin daño), pero divergencia git↔ledger. Ver §6. |
 | 20260708000072 | `drop_stock_option_grants.sql` | A1: DROP TABLE IF EXISTS public.stock_option_grants — tabla fantasma (0 filas) creada en mig-05, sustituida por stock_options en mig-16 (P-010). DROP aprobado Eric 08-jul-2026. to_regclass → NULL verificado. |
+| 20260709000073 | `backfill_trade_republic_efectivo.sql` | D-029: (1) Re-ancla initial_balance TR Efectivo Eric a 30.074,40 € (31-dic-2025). (2) INSERT 50 movimientos extracto PDF ene–jul 2026, source='backfill_extracto', external_id tr_bf_*. Artefacto PDF excluido (2026-01-15 +0,81 ES0173516115). Categorizados: 3 pagos Maristas (extraordinario), 9 transferencias, 20 inversion (7 interés+13 dividendos). 19 pendientes decisión Eric. (3) Fix Kutxabank TRANSF. 1586 −12.000 project_id→NULL. (4) balance_check TR 2026-07-07 = 13.459,46. Verificado: current_balance exacto. |
 
 ---
 
@@ -1227,6 +1228,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 - **P-006 (activo):** NDX1.DE en holding_prices sin holding asociado — necesario para stock_options_valued. Filas "huérfanas" esperadas.
 - **P-008 / D-001:** holding_prices acepta ticker=NULL AND isin=NULL. CHECK constraint pendiente (baja prioridad).
 - **`supabase db dump --linked`** requiere Docker. Para volcado fiel: iniciar Docker y ejecutar `npx supabase db dump --schema public --linked > docs/schema_dump.sql` antes del siguiente release.
+- **D-029 · Trade Republic = cuenta manual permanente:** Trade Republic no ofrece PSD2 a particulares. No es una conexión pendiente: es una cuenta manual estructural. Fuente de verdad: extracto PDF. Ancla 31-dic-2025 = 30.074,40 €. Backfill aplicado en mig-73 (09-jul-2026): 50 movimientos, saldo verificado 13.459,46 € a 07-jul-2026. Artefacto excluido: 2026-01-15 +0,81 ES0173516115 (duplicado de paginación PDF confirmado por Eric).
 
 ### 6.1 · Anomalías abiertas (reconciliación 8-jul-2026)
 
