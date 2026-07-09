@@ -344,6 +344,20 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
+## P-028 · 09-jul-2026 · **PERMANENTE**
+**Una migración se aplica por UNA SOLA VÍA — MCP y `db push` no son intercambiables en la misma sesión**
+
+El ledger `supabase_migrations.schema_migrations` registró tres nombres duplicados (mig-71, -72, -73): cada migración tenía una fila con el timestamp del archivo `.sql` y otra con el timestamp de reloj del momento de aplicación. Causa: `MCP apply_migration` inserta su propia fila con timestamp auto-generado; si después se llama también `migration repair --status applied <file_ts>`, el ledger acaba con dos entradas para el mismo SQL.
+
+**Regla de vía única:**
+- **Vía canónica (recomendada):** escribir el `.sql` versionado en git, luego `npx supabase db push` — una sola fila en el ledger, perfectamente sincronizada con el archivo.
+- **Vía alternativa (cambios urgentes sin archivo):** `MCP apply_migration` — crea una fila fantasma con timestamp de reloj. Si se sigue esta vía, hay que limpiar inmediatamente: `migration repair --status reverted <ts_fantasma>` (para quitar la fila de reloj) y luego `migration repair --status applied <ts_archivo>` (para registrar el timestamp correcto). **Nunca ambas vías para el mismo SQL.**
+- **`MCP apply_migration` + `repair --status applied` = duplicado garantizado.** El fantasma tiene timestamp de reloj (ej. `20260706115434`) sin `.sql` pareja; un rebuild desde archivos no lo reproduciría.
+
+**Cómo detectar:** `supabase migration list` muestra el mismo nombre dos veces en la columna Remote. **Cómo reparar:** `migration repair --status reverted <ts_fantasma>` (los tres de esta sesión se revirtieron el 09-jul-2026).
+
+---
+
 ## P-027 · 06-jul-2026 · **PERMANENTE**
 **Los grants inertes son deuda de seguridad — el perímetro se construye en capas**
 

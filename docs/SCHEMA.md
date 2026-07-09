@@ -6,7 +6,7 @@
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8). El desfase de 21 migraciones que motivó esta reconciliación es la prueba de por qué PRO-8 no es opcional.  
 > **P-009 (regla permanente):** antes de cualquier query nuevo, verificar columnas reales aquí o con `\d+ tabla`.
 >
-> **⚠ Anomalías abiertas detectadas en la reconciliación (ver §6):** (2) migración `revoke_anon_public` duplicada en el ledger sin archivo pareja; (3) `balance_checks_select` sin guard `auth.uid() IS NOT NULL`. *(A1 `stock_option_grants` RESUELTA mig-72 08-jul. A4 `can_read_account`/`can_see_account` investigada y resuelta: split lectura/escritura deliberado, no anomalía — ver §6.1.)*
+> **⚠ Anomalías abiertas detectadas en la reconciliación (ver §6):** (3) `balance_checks_select` sin guard `auth.uid() IS NOT NULL`. *(A1 RESUELTA mig-72 08-jul. A2 REPARADA 09-jul: ledger 79/79. A4 resuelta: split lectura/escritura deliberado — ver §6.1.)*
 
 ---
 
@@ -1233,7 +1233,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 ### 6.1 · Anomalías abiertas (reconciliación 8-jul-2026)
 
 - **A1 · `stock_option_grants` residual — RESUELTA ‹mig-72, 08-jul-2026›:** DROP aplicado con aprobación Eric. `SELECT to_regclass('public.stock_option_grants')` → NULL confirmado. §2.12 actualizado.
-- **A2 · `revoke_anon_public` duplicada en ledger:** dos entradas (`20260706000071` y `20260706115434`) con nombre idéntico. Probable doble aplicación (archivo + re-apply vía MCP con timestamp autogenerado). REVOKE es idempotente → sin daño de datos, pero el ledger tiene una entrada sin `.sql` pareja en `migrations/`: un `db push` la creería sincronizada y un rebuild desde archivos no la reproduciría. **Resolver en repo** (confirmar qué archivos existen; documentar o normalizar). Territorio P-015.
+- **A2 · ledger duplicado — REPARADA ‹09-jul-2026, P-028›:** tres nombres estaban duplicados (mig-71, -72, -73): cada uno tenía fila-de-archivo + fila-de-reloj por aplicación vía MCP + repair simultáneos. Tres fantasmas revertidos con `migration repair --status reverted 20260706115434 20260708110957 20260709080911`. Ledger resultante: 79 filas / 79 nombres únicos, Local = Remote en todos. Causa cortada en P-028: una migración, una sola vía de aplicación.
 - **A3 · `balance_checks_select` sin guard:** única tabla por-visibilidad cuya policy SELECT no incluye `auth.uid() IS NOT NULL` (el estándar mig-32). Inerte hoy (anon sin GRANT tras mig-71), pero defensa de una sola capa. Alinear con mig-32.
 - **A4 · `can_read_account` vs `can_see_account` — RESUELTO ‹recon 8-jul›:** no es duplicación ni código muerto, sino **split lectura/escritura** del modelo `shares` (mig 56). `can_read_account` = gate de lectura shares-aware (policies SELECT de holdings/manual_holdings/mh_history/transactions); `can_see_account` = gate de escritura owner-only (policies I/U/D + las 4 de bank_account_links). Ambas vivas y necesarias. Único fleco menor: `bank_account_links_select` usa el gate de escritura para leer (no honra shares) — verificar si es intencional.
 
