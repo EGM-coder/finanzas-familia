@@ -344,6 +344,20 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
+## P-029 · 10-jul-2026 · **PERMANENTE**
+**update_prices debe validar NaN/inf antes del insert. Un ticker sin precio no puede tumbar el job ni perder los precios ya obtenidos.**
+
+yfinance puede retornar un DataFrame no vacío con `Close = NaN` en la última fila (datos de mercado tardíos o sesión incompleta). Sin validación, `float(NaN)` llega al insert de Supabase → "Out of range float values are not JSON compliant" → excepción → el ticker se añade a `failed`. El job terminaba con `exit code 1` incluso si 10 de 16 tickers se habían guardado correctamente.
+
+**Reglas:**
+- Tras `hist["Close"].iloc[-1]`, comprobar `math.isnan(float(raw_close))` y `math.isinf(float(raw_close))`. Si cierto, retornar error del ticker — **nunca pasar al insert**.
+- Ídem para el precio convertido a EUR (`close * rate`).
+- Semántica de salida: `exit 0` si al menos un ticker se insertó (status `partial`); `exit 1` solo si ninguno (`status 'error'`). Los precios obtenidos **siempre** se guardan aunque otros fallen.
+
+**Aplicado en:** `egmfin-jobs/update_prices.py` — 10-jul-2026.
+
+---
+
 ## P-028 · 09-jul-2026 · **PERMANENTE**
 **Una migración se aplica por UNA SOLA VÍA — MCP y `db push` no son intercambiables en la misma sesión**
 

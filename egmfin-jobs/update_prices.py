@@ -19,6 +19,7 @@ Lectura de tickers desde holdings (is_active=TRUE) + stock_options (todos).
 Escribe holding_prices y currency_rates con source='yahoo'.
 """
 
+import math
 import os
 import sys
 from datetime import date
@@ -144,8 +145,14 @@ def fetch_price(ticker, isin, currency) -> tuple:
         hist = t.history(period="5d")
         if hist.empty:
             return None, None, None, "sin datos"
-        close = Decimal(str(hist["Close"].iloc[-1]))
+        raw_close = hist["Close"].iloc[-1]
         price_date = hist.index[-1].date().isoformat()
+
+        # P-029: rechazar NaN/inf antes de construir el payload
+        if raw_close is None or math.isnan(float(raw_close)) or math.isinf(float(raw_close)):
+            return None, None, None, f"precio NaN/inf ({yahoo_ticker})"
+
+        close = Decimal(str(raw_close))
 
         # BTC-EUR ya viene en EUR
         if yahoo_ticker.endswith("-EUR"):
@@ -154,7 +161,11 @@ def fetch_price(ticker, isin, currency) -> tuple:
         rate, _ = fetch_eur_rate(currency)
         if rate is None:
             return close, None, price_date, "sin tipo cambio"
-        return close, close * rate, price_date, None
+
+        close_eur = close * rate
+        if math.isnan(float(close_eur)) or math.isinf(float(close_eur)):
+            return close, None, price_date, f"precio EUR NaN/inf tras conversión ({yahoo_ticker})"
+        return close, close_eur, price_date, None
 
     except Exception as e:
         return None, None, None, str(e)
@@ -240,8 +251,12 @@ def main():
         print(f"  WARN: no se pudo guardar job_run: {e}")
 
     if failed:
-        print(f"ERROR: tickers sin precio: {', '.join(failed)}")
-        sys.exit(1)
+        msg = f"tickers sin precio: {', '.join(failed)}"
+        if inserted == 0:
+            print(f"ERROR: {msg}")
+            sys.exit(1)
+        else:
+            print(f"WARN: {msg}")
 
 
 if __name__ == "__main__":
