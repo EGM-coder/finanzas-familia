@@ -1,6 +1,6 @@
-# EGMFin · SCHEMA.md — Fuente de verdad (8-jul-2026)
+# EGMFin · SCHEMA.md — Fuente de verdad (10-jul-2026)
 
-> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **72 migraciones** aplicadas (hasta `20260706115434`).  
+> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **74 migraciones** aplicadas (hasta `20260710000074`).  
 > **Reconciliación 8-jul-2026:** el doc estaba congelado en mig-50 (7-jun). Esta revisión incorpora migs 51–71 del sprint de módulo cuentas (12-jun) y saneamiento/observabilidad (28-jun→06-jul). Cambios marcados con `‹recon 8-jul›`.  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible. Volcado por MCP en su lugar.  
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8). El desfase de 21 migraciones que motivó esta reconciliación es la prueba de por qué PRO-8 no es opcional.  
@@ -1089,6 +1089,30 @@ Salud del último cierre semanal por scope. Devuelve el `weekly_closures` más r
 
 ---
 
+### 3.19 · `public.v_income_freshness` *(mig 74)*
+
+Alerta de nómina no contabilizada. Devuelve **una sola fila** combinando dos señales:
+
+- **Señal primaria:** depósito Nordex (`counterparty ILIKE '%NORDEX%' AND amount > 0`) sin fila en `income_charges`. Ignora abonos anteriores a `psd2_cutoff` (≡ `v_income_reconciliation`). Si hay múltiples sin casar, toma el más antiguo (peor caso). Umbrales: ok ≤ 10 días · ambar 11–15 · rojo > 15.
+- **Señal secundaria (guard anti-caída-PSD2):** `current_date − max(incomes.date)` WHERE `source='nordex_payslip'`. Umbrales: ok ≤ 40 días · ambar 41–55 · rojo > 55.
+
+`status` = peor de ambas señales (`rojo > ambar > ok`).
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `last_income_date` | date | Último `date` en `incomes` (source=`nordex_payslip`) |
+| `days_since_last_income` | int | `current_date − last_income_date` |
+| `unmatched_deposit_date` | date | Fecha del depósito Nordex más antiguo sin income_charge (NULL si todos casados) |
+| `unmatched_deposit_amount` | numeric | Importe de ese depósito |
+| `days_since_deposit` | int | `current_date − unmatched_deposit_date` (NULL si ninguno) |
+| `status` | text | `ok` / `ambar` / `rojo` |
+
+**Security_invoker:** true — hereda RLS de `transactions`, `income_charges` e `incomes` (Grupos A y D).  
+**GRANT:** `SELECT` a `authenticated`.  
+**Smoke test 10-jul:** `status=ok`, `days_since_last_income=39`, `unmatched_deposit_date=NULL`.
+
+---
+
 ## 4 · GRANTs resumen por tabla
 
 | Tabla | authenticated SELECT | INSERT | UPDATE | DELETE | Notas |
@@ -1214,6 +1238,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260706115434 | `revoke_anon_public` | ⚠️ **DUPLICADO en ledger** ‹recon 8-jul› — mismo nombre, sin archivo `.sql` pareja conocido. REVOKE idempotente (sin daño), pero divergencia git↔ledger. Ver §6. |
 | 20260708000072 | `drop_stock_option_grants.sql` | A1: DROP TABLE IF EXISTS public.stock_option_grants — tabla fantasma (0 filas) creada en mig-05, sustituida por stock_options en mig-16 (P-010). DROP aprobado Eric 08-jul-2026. to_regclass → NULL verificado. |
 | 20260709000073 | `backfill_trade_republic_efectivo.sql` | D-029: (1) Re-ancla initial_balance TR Efectivo Eric a 30.074,40 € (31-dic-2025). (2) INSERT 50 movimientos extracto PDF ene–jul 2026, source='backfill_extracto', external_id tr_bf_*. Artefacto PDF excluido (2026-01-15 +0,81 ES0173516115). Categorizados: 3 pagos Maristas (extraordinario), 9 transferencias, 20 inversion (7 interés+13 dividendos). 19 pendientes decisión Eric. (3) Fix Kutxabank TRANSF. 1586 −12.000 project_id→NULL. (4) balance_check TR 2026-07-07 = 13.459,46. Verificado: current_balance exacto. |
+| 20260710000074 | `v_income_freshness.sql` | Vista de alerta nómina no contabilizada (1 fila). Señal primaria: depósito Nordex sin income_charge (ok/ambar/rojo por días). Señal secundaria: días desde último incomes.date (guard anti-PSD2-caída). status = peor. security_invoker + GRANT authenticated. Smoke test 10-jul: ok. |
 
 ---
 
