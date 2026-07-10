@@ -510,14 +510,16 @@ def main() -> None:
         logger.info("Bucket '%s' vacío — nada que procesar.", BUCKET)
         return
 
-    parsed  = 0
-    skipped = 0
-    errors  = 0
+    parsed     = 0
+    skipped    = 0
+    errors     = 0
+    pdfs_found = 0
 
     for obj in res:
         filename = obj.get('name', '')
         if not filename.lower().endswith('.pdf'):
             continue
+        pdfs_found += 1
 
         logger.info("Procesando: %s", filename)
 
@@ -579,9 +581,26 @@ def main() -> None:
 
     # Visibilidad — nunca éxito silencioso (lección del 422)
     logger.info(
-        "RESULTADO: parseadas=%d | saltadas (ya en DB)=%d | errores=%d",
-        parsed, skipped, errors,
+        "RESULTADO: parseadas=%d | saltadas (ya en DB)=%d | errores=%d | pdfs_encontrados=%d",
+        parsed, skipped, errors, pdfs_found,
     )
+
+    # Pulso del job (D-026)
+    # partial si el bucket no contenía ningún PDF (vacío lógico aunque haya otros objetos)
+    run_status = 'error' if errors > 0 else ('partial' if pdfs_found == 0 else 'ok')
+    try:
+        supabase.table('job_runs').insert({
+            'job_name': 'parse_nominas',
+            'status':   run_status,
+            'detail': {
+                'pdfs_found': pdfs_found,
+                'parsed':     parsed,
+                'skipped':    skipped,
+                'errors':     errors,
+            },
+        }).execute()
+    except Exception as e:
+        logger.warning("WARN: no se pudo guardar job_run: %s", e)
 
     if errors > 0:
         sys.exit(1)

@@ -639,6 +639,21 @@ def run():
         f'{total_matches} matches propuestos'
     )
 
+    # Pulso del job (D-026) — solo en LIVE, no en dry-run
+    if not DRY_RUN:
+        try:
+            sb.table('job_runs').insert({
+                'job_name': 'parse_orders_gmail',
+                'status':   'ok',
+                'detail': {
+                    'orders':  total_orders,
+                    'lines':   total_lines,
+                    'matches': total_matches,
+                },
+            }).execute()
+        except Exception as e:
+            logger.warning(f'WARN: no se pudo guardar job_run: {e}')
+
 
 if __name__ == '__main__':
     run()

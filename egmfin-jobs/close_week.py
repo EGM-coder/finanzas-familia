@@ -258,6 +258,23 @@ def main() -> None:
     logger.info(
         f'{flag}  Cierre {week} · {len(rows)} scopes · {n_ok} ok · {n_bad} parcial/roto'
     )
+
+    # Pulso del job (D-026)
+    try:
+        sb.table('job_runs').insert({
+            'job_name': 'close_week',
+            'status':   'ok' if exit_code == 0 else 'error',
+            'detail': {
+                'week':   str(week),
+                'scopes': len(rows),
+                'n_ok':   n_ok,
+                'n_bad':  n_bad,
+                'fraseo_ia': FRASEO_IA_ACTIVO,
+            },
+        }).execute()
+    except Exception as exc:
+        logger.warning(f'WARN: no se pudo guardar job_run: {exc}')
+
     # Toast de cierre (§4.3): "Semana cerrada." — lo surfacea el frontend al leer insights.
     sys.exit(exit_code)
 
