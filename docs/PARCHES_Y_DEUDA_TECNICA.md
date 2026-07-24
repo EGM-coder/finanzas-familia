@@ -344,6 +344,29 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
+## P-030 · 24-jul-2026 · **CORRECCIÓN DE DATOS + REGLAS**
+**Liquidaciones mensuales de tarjeta Kutxabank computando como gasto**
+
+**Síntoma:** 3 de las 6 liquidaciones mensuales TARJ.CRDTO en la cuenta IBAN Kutxabank (feb, may, jul-2026) aparecían como gasto en `v_spent_by_category_week` y `v_discretionary_spend_by_category_week`. Importe indebidamente computado: **4.111,21 EUR** (feb -1.498,71, may -905,16, jul -1.707,34).
+
+**Causa raíz:** Tres `classification_rules` activas empatadas en `priority=100` con `set_nature` contradictorio:
+- `7e871e90`: `set_nature='fijo_recurrente'` — **incorrecto**, causa que las liquidaciones no se excluyan del gasto
+- `cc75b0ff`: `set_nature=NULL` — incompleta, no fija nature
+- `5fa79379`: `set_nature='transferencia'` — correcta, pero en empate no determinista con las anteriores
+
+Al aplicarse las reglas sin orden determinista entre los empates, el resultado variaba por fila, dejando tres liquidaciones fuera del filtro `nature='transferencia'` de las vistas.
+
+**Corrección aplicada (`mig-75`, `20260724000075`):**
+1. `7e871e90` → `is_active=false` (desactivada: set_nature incorrecto)
+2. `cc75b0ff` → `set_nature='transferencia'` (completada)
+3. UPDATE sobre `transactions` con `TARJ.CRDTO%` + `account_id=8d8ae9ef-...` que tuvieran `category_id` o `nature` incorrectos. Fija ambos campos.
+
+No afecta a la cuenta Tarjeta Kutxabank Eric (inactiva por P-024). La regla `d03dbac0` (priority=30, is_active=false) no se toca.
+
+**Pendiente no resuelto por este parche:** La opacidad del desglose de la tarjeta Kutxabank (no se conoce el detalle de compras individuales dentro de cada liquidación) **no queda resuelta**. Las liquidaciones quedan correctamente excluidas del cómputo de gasto, pero el desglose interno sigue siendo opaco hasta que Kutxabank exponga PSD2 o se carguen los extractos manualmente.
+
+---
+
 ## P-029 · 10-jul-2026 · **PERMANENTE**
 **update_prices debe validar NaN/inf antes del insert. Un ticker sin precio no puede tumbar el job ni perder los precios ya obtenidos.**
 

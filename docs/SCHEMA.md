@@ -1,6 +1,6 @@
 # EGMFin · SCHEMA.md — Fuente de verdad (10-jul-2026)
 
-> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **74 migraciones** aplicadas (hasta `20260710000074`).  
+> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **75 migraciones** aplicadas (hasta `20260724000075`).  
 > **Reconciliación 8-jul-2026:** el doc estaba congelado en mig-50 (7-jun). Esta revisión incorpora migs 51–71 del sprint de módulo cuentas (12-jun) y saneamiento/observabilidad (28-jun→06-jul). Cambios marcados con `‹recon 8-jul›`.  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible. Volcado por MCP en su lugar.  
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8). El desfase de 21 migraciones que motivó esta reconciliación es la prueba de por qué PRO-8 no es opcional.  
@@ -1239,6 +1239,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260708000072 | `drop_stock_option_grants.sql` | A1: DROP TABLE IF EXISTS public.stock_option_grants — tabla fantasma (0 filas) creada en mig-05, sustituida por stock_options en mig-16 (P-010). DROP aprobado Eric 08-jul-2026. to_regclass → NULL verificado. |
 | 20260709000073 | `backfill_trade_republic_efectivo.sql` | D-029: (1) Re-ancla initial_balance TR Efectivo Eric a 30.074,40 € (31-dic-2025). (2) INSERT 50 movimientos extracto PDF ene–jul 2026, source='backfill_extracto', external_id tr_bf_*. Artefacto PDF excluido (2026-01-15 +0,81 ES0173516115). Categorizados: 3 pagos Maristas (extraordinario), 9 transferencias, 20 inversion (7 interés+13 dividendos). 19 pendientes decisión Eric. (3) Fix Kutxabank TRANSF. 1586 −12.000 project_id→NULL. (4) balance_check TR 2026-07-07 = 13.459,46. Verificado: current_balance exacto. |
 | 20260710000074 | `v_income_freshness.sql` | Vista de alerta nómina no contabilizada (1 fila). Señal primaria: depósito Nordex sin income_charge (ok/ambar/rojo por días). Señal secundaria: días desde último incomes.date (guard anti-PSD2-caída). status = peor. security_invoker + GRANT authenticated. Smoke test 10-jul: ok. |
+| 20260724000075 | `fix_tarjeta_kutxabank_nature.sql` | P-030 (DML): (1) Desactiva classification_rule 7e871e90 (set_nature='fijo_recurrente', incorrecto). (2) Completa classification_rule cc75b0ff (set_nature NULL→'transferencia'). (3) Sanea 3 transacciones TARJ.CRDTO% feb/may/jul-2026 (4.111,21 EUR) con nature≠'transferencia'. Las 6 liquidaciones quedan con category_id=Pago de tarjeta y nature=transferencia. |
 
 ---
 
