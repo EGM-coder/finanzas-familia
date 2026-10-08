@@ -60,7 +60,11 @@ HC_PING_KEY=... python3 check_alarms.py --test-fail   # fuerza /fail en egmfin-a
 HC_PING_KEY=... python3 check_alarms.py               # restaura a ok
 ```
 
+Sin la clave en local (lo normal, P-033): **Actions › hc_test › Run workflow**. Fuerza el `/fail`, espera 90 s y restaura a `ok`. Deben llegar dos correos: DOWN y UP.
+
 También: Actions › sync_psd2 › Run workflow (el step "Check alarms" pinguea `egmfin-alarmas`).
+
+Primera prueba real: 08-oct-2026.
 
 ## Añadir algo nuevo a la vigilancia
 
