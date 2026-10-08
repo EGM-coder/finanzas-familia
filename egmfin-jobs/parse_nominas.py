@@ -8,6 +8,8 @@ Flujo:
   3. Parsea campos anclados a códigos de nómina Nordex España.
   4. Split bonus/mensual con cuadratura de sumas.
   5. UPSERT idempotente en incomes (source='nordex_payslip', source_id='{date}:{type}').
+  6. Casado automático nómina ↔ abono en income_charges (match_method='auto').
+     Ver auto_match_month() para la regla exacta.
 
 Disparo: workflow_dispatch (manual). Ver .github/workflows/parse_nominas.yml.
 
@@ -18,6 +20,8 @@ Formato números en el PDF:
 Uso:
   python3 parse_nominas.py             # modo producción
   python3 parse_nominas.py --test /ruta/pdfs/  # golden test contra PDFs reales
+  python3 parse_nominas.py --rematch     # casado sobre TODOS los meses, no solo los recientes
+  python3 parse_nominas.py --match-only  # solo casado (sin PDFs) — step diario de sync_psd2 (T-043)
 """
 
 import os
@@ -73,6 +77,9 @@ EXTRA_CONCEPTS: dict[str, str] = {
     'bonus':      'Bonus {mes} (Libre Disposición)',
     'paga_extra': 'Paga Extra {mes}',
 }
+
+# Casado automático: sin --rematch solo se revisan los últimos N meses de incomes.
+AUTO_MATCH_RECENT_MONTHS = 3
 
 
 # ──────────────────────────────────────────────────────────────
@@ -491,10 +498,153 @@ def run_golden_tests(pdf_dir: str) -> None:
 
 
 # ──────────────────────────────────────────────────────────────
+# Casado automático nómina ↔ abono (income_charges)
+# ──────────────────────────────────────────────────────────────
+
+# Período del abono: últimos 6 dígitos de la descripción.
+#   "NOMINA NORDEX ENERGY SPAIN S.A.U SUELDOSALAR00023454202607" → '202607'
+DEPOSIT_PERIOD_RE = re.compile(r'(\d{6})\s*$')
+
+
+def auto_match_month(supabase, yyyymm: str, incomes: list[dict]) -> str:
+    """
+    Casa TODAS las filas de incomes del mes con el abono Nordex de ese período,
+    si y solo si:
+      - ninguna fila del mes está ya casada (nunca se toca un casado existente),
+      - hay exactamente UN abono Nordex libre cuyo período (YYYYMM) es el del mes,
+      - la suma de net_amount de las filas del mes == importe del abono, al céntimo.
+    Si algo falla, no casa: queda para la UI (/ingresos).
+
+    Devuelve el resultado: 'casado' | 'ya_casado' | 'sin_abono' |
+                           'multiples_abonos' | 'no_cuadra'.
+    """
+    income_ids = [r['id'] for r in incomes]
+
+    linked = (
+        supabase.table('income_charges')
+        .select('match_method')
+        .in_('income_id', income_ids)
+        .execute()
+    )
+    if linked.data:
+        methods = sorted({r['match_method'] for r in linked.data})
+        logger.info("  MATCH %s: ya casado (%s) — no se toca", yyyymm, ','.join(methods))
+        return 'ya_casado'
+
+    deposits = (
+        supabase.table('transactions')
+        .select('id, date, amount, description')
+        .ilike('counterparty', '%NORDEX%')
+        .gt('amount', 0)
+        .is_('order_id', 'null')
+        .is_('superseded_by', 'null')
+        .ilike('description', f'%{yyyymm}%')
+        .execute()
+    )
+    candidates = []
+    for t in deposits.data or []:
+        m = DEPOSIT_PERIOD_RE.search(t.get('description') or '')
+        if not m or m.group(1) != yyyymm:
+            continue
+        used = (
+            supabase.table('income_charges')
+            .select('id')
+            .eq('transaction_id', t['id'])
+            .limit(1)
+            .execute()
+        )
+        if not used.data:
+            candidates.append(t)
+
+    if not candidates:
+        logger.info("  MATCH %s: sin abono Nordex libre para el período", yyyymm)
+        return 'sin_abono'
+    if len(candidates) > 1:
+        logger.warning(
+            "  MATCH %s: %d abonos candidatos (%s) — no se casa, queda para la UI",
+            yyyymm, len(candidates), ', '.join(f"{c['date']} {c['amount']}" for c in candidates),
+        )
+        return 'multiples_abonos'
+
+    deposit = candidates[0]
+    total = sum((Decimal(str(r['net_amount'])) for r in incomes), Decimal('0'))
+    amount = Decimal(str(deposit['amount']))
+    if total != amount:
+        logger.warning(
+            "  MATCH %s: no cuadra — incomes %s vs abono %s (%s) — queda para la UI",
+            yyyymm, total, amount, deposit['date'],
+        )
+        return 'no_cuadra'
+
+    rows = [
+        {'income_id': iid, 'transaction_id': deposit['id'], 'match_method': 'auto'}
+        for iid in income_ids
+    ]
+    (
+        supabase.table('income_charges')
+        .upsert(rows, on_conflict='income_id,transaction_id', ignore_duplicates=True)
+        .execute()
+    )
+    logger.info(
+        "  MATCH %s: casado %d income(s) = %s con abono %s",
+        yyyymm, len(rows), amount, deposit['date'],
+    )
+    return 'casado'
+
+
+def auto_match(supabase, rematch: bool) -> dict[str, int]:
+    """Recorre los meses con incomes nordex_payslip y aplica auto_match_month()."""
+    res = (
+        supabase.table('incomes')
+        .select('id, date, net_amount')
+        .eq('source', SOURCE)
+        .execute()
+    )
+    by_month: dict[str, list[dict]] = {}
+    for r in res.data or []:
+        by_month.setdefault(r['date'][:7].replace('-', ''), []).append(r)
+
+    months = sorted(by_month)
+    if not rematch:
+        months = months[-AUTO_MATCH_RECENT_MONTHS:]
+    logger.info("Casado automático (%s): %s", 'rematch' if rematch else 'recientes', months)
+
+    counts: dict[str, int] = {}
+    for yyyymm in months:
+        outcome = auto_match_month(supabase, yyyymm, by_month[yyyymm])
+        counts[outcome] = counts.get(outcome, 0) + 1
+    return counts
+
+
+def main_match_only(rematch: bool = False) -> None:
+    """
+    Solo casado nómina ↔ abono, sin tocar el bucket ni incomes. Corre a diario tras
+    sync_psd2: si la nómina se parseó antes de que llegara el abono, se casa aquí (T-043).
+    """
+    if not all([SUPABASE_URL, SUPABASE_SERVICE_KEY]):
+        logger.error("Faltan variables de entorno: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY")
+        sys.exit(1)
+
+    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)  # type: ignore[arg-type]
+    match_counts = auto_match(supabase, rematch)
+    logger.info("RESULTADO casado: %s", match_counts)
+
+    # Pulso del job (D-026)
+    try:
+        supabase.table('job_runs').insert({
+            'job_name': 'match_nominas',
+            'status':   'ok',
+            'detail':   {'rematch': rematch, 'match': match_counts},
+        }).execute()
+    except Exception as e:
+        logger.warning("WARN: no se pudo guardar job_run: %s", e)
+
+
+# ──────────────────────────────────────────────────────────────
 # Main — modo producción
 # ──────────────────────────────────────────────────────────────
 
-def main() -> None:
+def main(rematch: bool = False) -> None:
     if not all([SUPABASE_URL, SUPABASE_SERVICE_KEY, OWNER_USER_ID]):
         logger.error(
             "Faltan variables de entorno: "
@@ -505,10 +655,9 @@ def main() -> None:
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)  # type: ignore[arg-type]
 
     # Lista objetos del bucket
-    res = supabase.storage.from_(BUCKET).list()
+    res = supabase.storage.from_(BUCKET).list() or []
     if not res:
-        logger.info("Bucket '%s' vacío — nada que procesar.", BUCKET)
-        return
+        logger.info("Bucket '%s' vacío — nada que parsear.", BUCKET)
 
     parsed     = 0
     skipped    = 0
@@ -585,6 +734,15 @@ def main() -> None:
         parsed, skipped, errors, pdfs_found,
     )
 
+    # Casado nómina ↔ abono — un fallo aquí cuenta como error del job
+    match_counts: dict[str, int] = {}
+    try:
+        match_counts = auto_match(supabase, rematch)
+        logger.info("RESULTADO casado: %s", match_counts)
+    except Exception as e:
+        logger.error("ERROR en casado automático: %s", e, exc_info=True)
+        errors += 1
+
     # Pulso del job (D-026)
     # partial si el bucket no contenía ningún PDF (vacío lógico aunque haya otros objetos)
     run_status = 'error' if errors > 0 else ('partial' if pdfs_found == 0 else 'ok')
@@ -597,6 +755,8 @@ def main() -> None:
                 'parsed':     parsed,
                 'skipped':    skipped,
                 'errors':     errors,
+                'rematch':    rematch,
+                'match':      match_counts,
             },
         }).execute()
     except Exception as e:
@@ -611,5 +771,7 @@ if __name__ == '__main__':
         idx = sys.argv.index('--test')
         pdf_dir = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else '.'
         run_golden_tests(pdf_dir)
+    elif '--match-only' in sys.argv:
+        main_match_only(rematch='--rematch' in sys.argv)
     else:
-        main()
+        main(rematch='--rematch' in sys.argv)

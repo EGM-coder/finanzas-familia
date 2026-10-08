@@ -344,6 +344,56 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
+## P-033 · 08-oct-2026 · **PERMANENTE**
+**Nunca imprimir valores de variables de entorno ni de `.env` — ni siquiera "solo los nombres"**
+
+**Incidente:** para comprobar qué variables tenía `egmfin-jobs/.env`, se ejecutó `cut -d= -f1 .env`. Los valores multilínea no tienen `=` en sus líneas de continuación, así que el cuerpo entero de la clave PEM `ENABLE_BANKING_JWT_PRIVATE_KEY` salió por pantalla y quedó en la conversación con el asistente. No llegó a git.
+
+**Regla:** para comprobar que una variable existe, imprimir solo **nombre y longitud** (`print(name, len(os.getenv(name) or ''))`). Nunca `cat`, `cut`, `grep`, `env`, `printenv` ni `echo $VAR` sobre ficheros o entornos con secretos. Aplica a humanos y a agentes.
+
+**Acción pendiente (Eric):** rotar la clave privada de Enable Banking y actualizar el secret de GitHub `ENABLE_BANKING_JWT_PRIVATE_KEY` + `egmfin-jobs/.env`.
+
+---
+
+## P-032 · 08-oct-2026 · **RESUELTO** (`parse_nominas.py`, sin migración)
+**Casado nómina ↔ abono solo existía como clic manual — jul/ago/sep sin casar 71 días**
+
+**Síntoma:** `v_income_freshness` en `rojo` (abono 29-jul 3.943,89 sin nómina casada, 71 días) aunque `incomes` y `transactions` cuadraban al céntimo para jul, ago y sep.
+
+**Causa raíz:** ningún componente automático escribía `income_charges`. La única vía era `confirmMatch()` (`app/(egm)/ingresos/_actions/nominas.ts`), disparada a mano desde /ingresos. Las 7 filas previas son `match_method='confirmed'`: feb–may casadas el 08-jun, junio el 10-jul. Desde entonces nadie pulsó "confirmar". La creencia de que junio "se casó automáticamente" era falsa.
+
+**Corrección:** `auto_match()` en `egmfin-jobs/parse_nominas.py`, al final de cada ejecución. Regla:
+1. Período del abono = últimos 6 dígitos de la descripción (`…SUELDOSALAR00023454202607` → `202607`).
+2. Se casa SI Y SOLO SI hay exactamente UN abono Nordex libre (`amount>0`, `order_id`/`superseded_by` NULL, sin fila en `income_charges`) con ese período Y la suma de `net_amount` de TODAS las filas `nordex_payslip` del mes es igual al abono al céntimo.
+3. Todas las filas del mes → mismo `transaction_id`, `match_method='auto'`.
+4. Si alguna fila del mes ya está casada (cualquier método) → no se toca. Nunca se sobrescribe un `confirmed`.
+5. No cuadra / varios candidatos / sin abono → log y queda para la UI.
+6. Idempotente (upsert `ON CONFLICT DO NOTHING`). Por defecto revisa los 3 últimos meses; `--rematch` (input `rematch` en el workflow) revisa todos.
+
+**Ejecución 08-oct-2026 (`--rematch`):** casados 202607 (2 incomes = 3.943,89), 202608 (3.406,67), 202609 (3.424,17). feb–jun `ya_casado`; jul-2025–ene-2026 `sin_abono` (anteriores al corte PSD2). Re-ejecución → `ya_casado` ×3. `v_income_freshness` → `ok`.
+
+**Complemento:** T-043 — el casado corre también a diario tras `sync_psd2` (`--match-only`).
+
+---
+
+## P-031 · 08-oct-2026 · **PERMANENTE**
+**La vigilancia de EGMFin vive fuera de EGMFin**
+
+**Incidente 23-sep → 08-oct-2026:** GitHub desactivó los crons por inactividad del repo → sin jobs, Supabase (Free) pausó la base por falta de actividad → las alarmas (`job_runs`, `v_income_freshness`, /estado) vivían dentro de la base apagada. Nadie se enteró durante 15 días.
+
+**Regla:** un vigilante alojado en lo que vigila no puede avisar de su propia muerte. Toda alarma que importe debe acabar en un sistema externo que avise por correo **por ausencia** de señal, no solo por presencia de error.
+
+**Implementación:** Healthchecks.io (ver `docs/VIGILANCIA.md`).
+- `egmfin-jobs/hc.py` — `ping(slug, start|ok|fail)`, nunca lanza; `run(slug, fn)` envuelve un job.
+- `sync_psd2`, `update_prices`, `close_week` → pings `start` / `ok` / `fail` por código de salida (`partial` sale con 0 → ok).
+- `check_alarms.py` (step final de `sync_psd2`, `if: always()`) → reenvía cualquier `rojo` de las vistas `v_*_freshness` a `egmfin-alarmas`. Si no puede leer Supabase (base pausada) → `fail`.
+- `keepalive.yml` semanal → commit vacío si el último commit tiene > 30 días; ping `egmfin-keepalive`.
+- Un único secret de repo: `HC_PING_KEY`. Nunca URLs ni claves en el repo.
+
+**Cómo aplicar:** todo job programado nuevo debe envolverse con `hc.run('<slug>', main)` y llevar `HC_PING_KEY` en su `.yml`; toda vista de alarma nueva debe llamarse `v_<algo>_freshness` con columna `status ∈ {ok, ambar, rojo}` para que `check_alarms` la recoja sin tocar código.
+
+---
+
 ## P-030 · 24-jul-2026 · **CORRECCIÓN DE DATOS + REGLAS**
 **Liquidaciones mensuales de tarjeta Kutxabank computando como gasto**
 
@@ -500,6 +550,8 @@ Resuelto en mig-62 para los 3 writers. T-039 pendiente para los 6 helpers.
 | T-034 | **RESUELTA** (04-jun-2026). Tres fixes en un solo commit de código: (1) Bug "error al desenlazar" — mig-37 habilitó RLS en purchase_order_charges sin crear policy DELETE; mig-42 añadió GRANT DELETE pero sin policy el RLS deny-by-default bloqueaba → mig-44 añade `pol_charges_delete USING can_see_transaction(transaction_id)`. (2) T-032 (drawer deslizable + rechazar enlace): `rejectMatch` action (DELETE charge ai_proposed + match_status='sin_linkar'); botón Rechazar en footer del PedidoDrawer junto a Confirmar; Handle Vaul visible; CSS en egm.css: `touch-action: none` en handle, `pan-y` en drawer right, `pointer-events: auto` en overlay, `transform: none` en .egm (evita romper position:fixed de portales). (3) Rail detection: unificada a la misma lógica que T-031 (counterparty OR description OR raw_concept contiene 'paypal'/'amazon'); el cargo de Iberia pagado con PayPal detecta como raíl desde el campo description/raw_concept → PV-3 visible en Control y toggle "marcar directo" accesible en CategorizationDrawer sin necesitar un pedido. | — |
 | T-033 | **RESUELTA** (04-jun-2026). Cargo directo de raíl: `transactions.is_direct_charge boolean NOT NULL DEFAULT false` (mig-43). PV-3 en Control pasa a tres estados solo para cargos de raíl (PayPal/Amazon, order_id no nulo, o is_direct_charge=true): ● vinculado (order_id), — directo (is_direct_charge), ○ sin vincular. Toggle en CategorizationDrawer: "Marcar como cargo directo" / "Quitar cargo directo", solo visible si order_id IS NULL y es raíl; actualización optimista + router.refresh. searchCandidates filtra is_direct_charge=false (cargos directos no se ofrecen para enlazar). Doctrina: los cargos de raíl pueden marcarse a mano como directos; el sistema nunca lo infiere. GRANT UPDATE en transactions ya existía (mig 22). Archivos: mig-43, toggleDirectCharge.ts, CategorizationDrawer.tsx, ControlTable.tsx, ControlMonthLedger.tsx, control/page.tsx, pedidos.ts. | — |
 | T-036 | **RESUELTA** (04-jun-2026). Neutralización reversible de duplicados h_/er_: columna `transactions.superseded_by uuid NULL FK self` (mig-45); vistas `v_spent_by_category_month`, `v_spent_by_category_week`, `v_fixed_expenses_observed` filtran `superseded_by IS NULL` (mig-46); queries directas del frontend (inicio, planner, control, searchCandidates) añaden `.is('superseded_by', null)`; 5 filas h_ marcadas via service role con sus gemelas er_ canónicas. Lección documentada en P-019. Sin DELETE, sin pérdida de datos. | — |
+| T-043 | **RESUELTA** (08-oct-2026). El casado automático (P-032) solo corría al lanzar `parse_nominas` (manual): si la nómina se parseaba antes de llegar el abono, el mes quedaba sin casar → rojo a los 16 días. Fix: `parse_nominas.py --match-only` (solo `auto_match()`, sin PDFs, idempotente, `job_runs.job_name='match_nominas'`) como step diario de `sync_psd2.yml`, después del sync y antes de `check_alarms`. | — |
+| T-042 | **RESUELTA** (08-oct-2026, mig-76). Falso rojo mensual en `v_income_freshness`: la señal secundaria (`CURRENT_DATE - max(incomes.date)`, con `incomes.date` = día 1) daba ambar > 40 / rojo > 55 días → rojo hacia el día 27 de cada mes con todo en orden, = correo falso de `egmfin-alarmas`. Fix: umbrales secundaria ambar > 62 / rojo > 75 (dos nóminas perdidas). Primaria (abono sin casar 11–15 / > 15) intacta. Aplicada por `db push` (vía única P-028); ledger con una sola fila 20261008000076. | — |
 | T-041 | **PENDIENTE — BLOQUEADO POR OAUTH INTERACTIVO.** `parse_orders_outlook.py` en GitHub Actions. El script usa MSAL Device Code Flow (`/consumers` tenant) que requiere interacción humana (el runner imprime un código y bloquea esperando a que el usuario visite `microsoft.com/devicelogin`). Además, el path de refresco silencioso está roto: `_load_cached_token()` lee el JSON del disco pero `app.get_accounts()` consulta la caché MSAL en memoria (vacía en cada proceso nuevo), por lo que nunca toma la rama silenciosa aunque el token esté guardado. Microsoft personal accounts no admiten `client_credentials` flow (`/consumers` no soporta OAuth sin usuario). **No crear el workflow hasta resolver el authn:** opciones a evaluar cuando sea prioritario: (a) migrar a `acquire_token_by_refresh_token()` + almacenar `refresh_token` como secret de repo y rotarlo manualmente cada 90 días; (b) migrar a una cuenta Microsoft Entra (AAD) con `client_credentials` y `Mail.Read` con admin consent — requiere tenant corporativo. **Workflow sin crear a propósito.** | Baja |
 | T-040 | **PENDIENTE.** `fn_supersede_pending_booked` exige `date` idéntica entre h_ y er_. Si el banco mueve la fecha valor entre PENDING y BOOKED (p.ej. cargo viernes → liquidado lunes), el par no casará y el gasto seguirá duplicado. Solución futura: ampliar la condición de fecha a `ABS(e.date - h.date) <= 3` (o similar) con filtro adicional para evitar falsos positivos en misma cuenta/importe cercanos. Registrada en P-023 como limitación conocida. Baja urgencia mientras no se observe en producción. | Baja |
 | T-039 | **PENDIENTE.** Endurecer `anon` en los 6 helpers de RLS: `user_role()`, `can_see_account(uuid)`, `can_see_transaction(uuid)`, `can_see_order(uuid)`, `can_read_account(<sig>)`, `can_see_visibility(<sig>)`. Patrón: `REVOKE EXECUTE FROM PUBLIC; GRANT EXECUTE TO authenticated, service_role;` — nunca quitar `authenticated` o las policies RLS dejan de evaluarse. Hacer con migración propia, no en caliente. Baja urgencia: estos helpers no escriben datos (INVOKER), pero reducen superficie de ataque. Ver P-022. | Baja |

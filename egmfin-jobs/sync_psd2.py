@@ -548,4 +548,5 @@ def sync_psd2():
 
 
 if __name__ == '__main__':
-    sync_psd2()
+    import hc
+    hc.run('egmfin-sync-psd2', sync_psd2)

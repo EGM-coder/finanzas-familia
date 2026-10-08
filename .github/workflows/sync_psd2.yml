@@ -31,5 +31,26 @@ jobs:
           ENABLE_BANKING_JWT_PRIVATE_KEY: ${{ secrets.ENABLE_BANKING_JWT_PRIVATE_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          HC_PING_KEY: ${{ secrets.HC_PING_KEY }}
         run: |
           python3 sync_psd2.py
+
+      # Casado nómina ↔ abono (sin PDFs) — el abono puede llegar después de parsear la nómina (T-043)
+      - name: Match nóminas
+        working-directory: egmfin-jobs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python3 parse_nominas.py --match-only
+
+      # Reenvío de alarmas de datos a Healthchecks — corre aunque el sync falle
+      - name: Check alarms
+        if: always()
+        working-directory: egmfin-jobs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          HC_PING_KEY: ${{ secrets.HC_PING_KEY }}
+        run: |
+          python3 check_alarms.py

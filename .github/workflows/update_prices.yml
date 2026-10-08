@@ -20,6 +20,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          HC_PING_KEY: ${{ secrets.HC_PING_KEY }}
         run: python update_prices.py
       - name: Capture patrimonio snapshot
         env:

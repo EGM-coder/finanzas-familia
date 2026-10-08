@@ -260,4 +260,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import hc
+    # 'partial' (algún fondo sin NAV) sale con 0 → ping ok; solo 'error' sale con 1 → fail
+    hc.run('egmfin-update-prices', main)

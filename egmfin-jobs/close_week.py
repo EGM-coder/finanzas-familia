@@ -280,4 +280,5 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    import hc
+    hc.run('egmfin-close-week', main)

@@ -1,0 +1,56 @@
+name: keepalive
+
+# GitHub desactiva los crons de un repo sin actividad (60 días). Si el último commit
+# tiene más de 30 días, este workflow hace un commit vacío para mantenerlos vivos.
+# Ver docs/VIGILANCIA.md.
+
+on:
+  schedule:
+    # Domingos 07:00 UTC
+    - cron: '0 7 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Commit vacío si el último commit tiene más de 30 días
+        run: |
+          last=$(git log -1 --format=%ct)
+          age_days=$(( ($(date +%s) - last) / 86400 ))
+          echo "Último commit hace ${age_days} días"
+          if [ "$age_days" -gt 30 ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore(keepalive): commit vacío para mantener los crons activos"
+            git push
+            echo "Commit keepalive empujado"
+          else
+            echo "Nada que hacer (≤ 30 días)"
+          fi
+
+      - name: Set up Python
+        if: always()
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Ping Healthchecks
+        if: always()
+        working-directory: egmfin-jobs
+        env:
+          HC_PING_KEY: ${{ secrets.HC_PING_KEY }}
+        run: |
+          pip install python-dotenv
+          if [ "${{ job.status }}" = "success" ]; then
+            python3 hc.py egmfin-keepalive ok
+          else
+            python3 hc.py egmfin-keepalive fail "keepalive falló — ver log en GitHub Actions"
+          fi

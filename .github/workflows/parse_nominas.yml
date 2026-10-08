@@ -2,6 +2,11 @@ name: parse_nominas
 
 on:
   workflow_dispatch:  # Solo manual — se dispara cuando Eric sube nuevas nóminas al bucket
+    inputs:
+      rematch:
+        description: 'Casado nómina↔abono sobre TODOS los meses (no solo los 3 últimos)'
+        type: boolean
+        default: false
 
 jobs:
   parse:
@@ -33,4 +38,4 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           EGMFIN_OWNER_USER_ID: ${{ secrets.EGMFIN_OWNER_USER_ID }}
         run: |
-          python3 parse_nominas.py
+          python3 parse_nominas.py ${{ inputs.rematch && '--rematch' || '' }}
