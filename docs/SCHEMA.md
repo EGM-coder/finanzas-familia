@@ -1,6 +1,6 @@
 # EGMFin · SCHEMA.md — Fuente de verdad (10-jul-2026)
 
-> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **76 migraciones** aplicadas (hasta `20261008000076`).  
+> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **77 migraciones** aplicadas (hasta `20261011000077`).  
 > **Reconciliación 8-jul-2026:** el doc estaba congelado en mig-50 (7-jun). Esta revisión incorpora migs 51–71 del sprint de módulo cuentas (12-jun) y saneamiento/observabilidad (28-jun→06-jul). Cambios marcados con `‹recon 8-jul›`.  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible. Volcado por MCP en su lugar.  
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8). El desfase de 21 migraciones que motivó esta reconciliación es la prueba de por qué PRO-8 no es opcional.  
@@ -1243,6 +1243,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260710000074 | `v_income_freshness.sql` | Vista de alerta nómina no contabilizada (1 fila). Señal primaria: depósito Nordex sin income_charge (ok/ambar/rojo por días). Señal secundaria: días desde último incomes.date (guard anti-PSD2-caída). status = peor. security_invoker + GRANT authenticated. Smoke test 10-jul: ok. |
 | 20260724000075 | `fix_tarjeta_kutxabank_nature.sql` | P-030 (DML): (1) Desactiva classification_rule 7e871e90 (set_nature='fijo_recurrente', incorrecto). (2) Completa classification_rule cc75b0ff (set_nature NULL→'transferencia'). (3) Sanea 3 transacciones TARJ.CRDTO% feb/may/jul-2026 (4.111,21 EUR) con nature≠'transferencia'. Las 6 liquidaciones quedan con category_id=Pago de tarjeta y nature=transferencia. |
 | 20261008000076 | `v_income_freshness_secundaria.sql` | T-042: CREATE OR REPLACE v_income_freshness, misma firma. Solo señal secundaria: ambar >62 / rojo >75 días (antes >40 / >55, rojo falso mensual). Primaria intacta. Aplicada por `db push` (P-028, vía única). Verificado 08-oct: status=ok. |
+| 20261011000077 | `backfill_trade_republic_jul_oct.sql` | D-029 (DML): INSERT 20 movimientos extracto TR 08-jul → 01-oct-2026 (`tr_bf_YYYYMMDD_N`, ON CONFLICT DO NOTHING), source='backfill_extracto'. 7 interés/dividendo → nature='inversion'; 13 tarjeta (PayPal, DAZN, Selecta) → nature/category/project NULL, pendientes de Eric. balance_check 2026-10-10 = 13.004,87 (extracto_tr). **TR anclado a 10-oct-2026.** Verificado: current_balance = 13.004,87; 70 movimientos. Holdings sin tocar. |
 
 ---
 
@@ -1257,7 +1258,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 - **P-006 (activo):** NDX1.DE en holding_prices sin holding asociado — necesario para stock_options_valued. Filas "huérfanas" esperadas.
 - **P-008 / D-001:** holding_prices acepta ticker=NULL AND isin=NULL. CHECK constraint pendiente (baja prioridad).
 - **`supabase db dump --linked`** requiere Docker. Para volcado fiel: iniciar Docker y ejecutar `npx supabase db dump --schema public --linked > docs/schema_dump.sql` antes del siguiente release.
-- **D-029 · Trade Republic = cuenta manual permanente:** Trade Republic no ofrece PSD2 a particulares. No es una conexión pendiente: es una cuenta manual estructural. Fuente de verdad: extracto PDF. Ancla 31-dic-2025 = 30.074,40 €. Backfill aplicado en mig-73 (09-jul-2026): 50 movimientos, saldo verificado 13.459,46 € a 07-jul-2026. Artefacto excluido: 2026-01-15 +0,81 ES0173516115 (duplicado de paginación PDF confirmado por Eric).
+- **D-029 · Trade Republic = cuenta manual permanente:** Trade Republic no ofrece PSD2 a particulares. No es una conexión pendiente: es una cuenta manual estructural. Fuente de verdad: extracto PDF. Ancla 31-dic-2025 = 30.074,40 €. Backfill aplicado en mig-73 (09-jul-2026): 50 movimientos, saldo verificado 13.459,46 € a 07-jul-2026. Ampliado en mig-77 (11-oct-2026): +20 movimientos, saldo verificado 13.004,87 € a 10-oct-2026 — **TR anclado a 10-oct-2026**. Artefacto excluido: 2026-01-15 +0,81 ES0173516115 (duplicado de paginación PDF confirmado por Eric).
 
 ### 6.1 · Anomalías abiertas (reconciliación 8-jul-2026)
 
