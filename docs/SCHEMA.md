@@ -1,6 +1,6 @@
 # EGMFin · SCHEMA.md — Fuente de verdad (10-jul-2026)
 
-> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **77 migraciones** aplicadas (hasta `20261011000077`).  
+> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **78 migraciones** aplicadas (hasta `20261011000078`).  
 > **Reconciliación 8-jul-2026:** el doc estaba congelado en mig-50 (7-jun). Esta revisión incorpora migs 51–71 del sprint de módulo cuentas (12-jun) y saneamiento/observabilidad (28-jun→06-jul). Cambios marcados con `‹recon 8-jul›`.  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible. Volcado por MCP en su lugar.  
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8). El desfase de 21 migraciones que motivó esta reconciliación es la prueba de por qué PRO-8 no es opcional.  
@@ -1115,6 +1115,31 @@ Alerta de nómina no contabilizada. Devuelve **una sola fila** combinando dos se
 
 ---
 
+### 3.20 · `public.v_manual_account_freshness` *(mig 78)*
+
+Alerta de cuenta manual (sin PSD2) sin anclar. **Una fila por cuenta** del perímetro (D-030):
+`is_active = true` · `type IN ('bank','cash','tesoreria_tae')` · `titular IN ('eric','comun')` · sin fila `is_active` en `bank_account_links` · `account_balances_full.current_balance >= 100`.
+
+Umbrales sobre `current_date − max(balance_checks.check_date)`: ok ≤ 21 días · ambar 22–35 · rojo > 35 **o nunca anclada**. Motivo: TR es la mayor posición de efectivo y tiene gasto recurrente; más de 3 semanas sin extracto deja de ser fiable.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `account_id` | uuid | `accounts.id` |
+| `account_name` | text | `accounts.name` |
+| `institution` | text | `accounts.institution` |
+| `titular` | text | `eric` / `comun` |
+| `current_balance` | numeric | `account_balances_full.current_balance` |
+| `last_check_date` | date | Último `balance_checks.check_date` (NULL si nunca) |
+| `days_since_check` | int | `current_date − last_check_date` |
+| `status` | text | `ok` / `ambar` / `rojo` |
+
+**Security_invoker:** true — hereda RLS de `accounts`, `bank_account_links`, `balance_checks`.  
+**GRANT:** `SELECT` a `authenticated`.  
+**Smoke test 11-oct:** 1 fila — Trade Republic Efectivo Eric, `last_check_date=2026-10-10`, `status=ok`. MyInvestor común TAE (9,43 €) fuera por materialidad.  
+**Consumidor externo:** `egmfin-jobs/check_alarms.py` → Healthchecks `egmfin-alarmas` (P-031), un motivo por cuenta en rojo.
+
+---
+
 ## 4 · GRANTs resumen por tabla
 
 | Tabla | authenticated SELECT | INSERT | UPDATE | DELETE | Notas |
@@ -1244,6 +1269,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20260724000075 | `fix_tarjeta_kutxabank_nature.sql` | P-030 (DML): (1) Desactiva classification_rule 7e871e90 (set_nature='fijo_recurrente', incorrecto). (2) Completa classification_rule cc75b0ff (set_nature NULL→'transferencia'). (3) Sanea 3 transacciones TARJ.CRDTO% feb/may/jul-2026 (4.111,21 EUR) con nature≠'transferencia'. Las 6 liquidaciones quedan con category_id=Pago de tarjeta y nature=transferencia. |
 | 20261008000076 | `v_income_freshness_secundaria.sql` | T-042: CREATE OR REPLACE v_income_freshness, misma firma. Solo señal secundaria: ambar >62 / rojo >75 días (antes >40 / >55, rojo falso mensual). Primaria intacta. Aplicada por `db push` (P-028, vía única). Verificado 08-oct: status=ok. |
 | 20261011000077 | `backfill_trade_republic_jul_oct.sql` | D-029 (DML): INSERT 20 movimientos extracto TR 08-jul → 01-oct-2026 (`tr_bf_YYYYMMDD_N`, ON CONFLICT DO NOTHING), source='backfill_extracto'. 7 interés/dividendo → nature='inversion'; 13 tarjeta (PayPal, DAZN, Selecta) → nature/category/project NULL, pendientes de Eric. balance_check 2026-10-10 = 13.004,87 (extracto_tr). **TR anclado a 10-oct-2026.** Verificado: current_balance = 13.004,87; 70 movimientos. Holdings sin tocar. |
+| 20261011000078 | `v_manual_account_freshness.sql` | D-030: vista de alerta de cuenta manual sin anclar (una fila por cuenta: activa, bank/cash/tesoreria_tae, titular eric/comun, sin link PSD2 activo, saldo ≥ 100). ok ≤21 / ambar 22–35 / rojo >35 días o nunca. security_invoker + GRANT authenticated. Smoke test 11-oct: 1 fila (TR Eric, ok). Ver §3.20. |
 
 ---
 

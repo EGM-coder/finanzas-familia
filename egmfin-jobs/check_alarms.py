@@ -80,12 +80,26 @@ def describe_income(row: dict) -> str:
     return "Nómina: " + "; ".join(parts)
 
 
+def describe_manual_account(row: dict) -> str:
+    name = row.get('account_name') or row.get('account_id')
+    if not row.get('last_check_date'):
+        return f"{name}: nunca anclada (saldo {fmt_eur(row['current_balance'])})"
+    return (
+        f"{name}: último extracto hace {row['days_since_check']} días "
+        f"({fmt_day(row['last_check_date'])})"
+    )
+
+
 def describe_generic(view: str, row: dict) -> str:
     fields = ', '.join(f"{k}={v}" for k, v in row.items() if k != 'status' and v is not None)
     return f"{view}: {fields}"
 
 
-DESCRIBERS = {'v_income_freshness': describe_income}
+# Una vista puede devolver varias filas: cada fila en rojo aporta su propio motivo.
+DESCRIBERS = {
+    'v_income_freshness':         describe_income,
+    'v_manual_account_freshness': describe_manual_account,
+}
 
 
 # ── Lectura ──────────────────────────────────────────────────
