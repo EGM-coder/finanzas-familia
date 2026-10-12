@@ -1,6 +1,6 @@
 # EGMFin · SCHEMA.md — Fuente de verdad (10-jul-2026)
 
-> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **80 migraciones** aplicadas (hasta `20261012000080`).  
+> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **82 migraciones** aplicadas (hasta `20261012000082`).  
 > **Reconciliación 8-jul-2026:** el doc estaba congelado en mig-50 (7-jun). Esta revisión incorpora migs 51–71 del sprint de módulo cuentas (12-jun) y saneamiento/observabilidad (28-jun→06-jul). Cambios marcados con `‹recon 8-jul›`.  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible. Volcado por MCP en su lugar.  
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8). El desfase de 21 migraciones que motivó esta reconciliación es la prueba de por qué PRO-8 no es opcional.  
@@ -55,8 +55,8 @@
 ### `public.can_see_visibility(p_visibility text) → boolean` ‹recon 8-jul›
 `sql SECURITY DEFINER STABLE` (mig 56) — Recibe un valor de `visibility` (no un id) y resuelve si el usuario actual puede verlo, considerando `user_role()` y las concesiones activas en `shares`. Base del muro tri-state ampliado con compartición explícita.
 
-### `public.fn_supersede_pending_booked() → integer` ‹recon 8-jul›
-`plpgsql SECURITY DEFINER VOLATILE` (mig 59, reescrita v2 en mig 66) — Deduplicador PSD2. Empareja PENDING (`h_`) con BOOKED (`er_`) por **descripción normalizada** (lower, sin `:`, espacios colapsados) + contención bidireccional, 1:1 estricto; marca el duplicado con `superseded_by` y hereda categoría/proyecto/nature del pending si el booked está sin decidir. Devuelve nº de filas neutralizadas. **T-040:** no casa si el banco mueve la fecha entre pending y booked.
+### `public.fn_supersede_pending_booked() → integer` ‹recon 8-jul› *(criterio 2: mig 81)*
+`plpgsql SECURITY DEFINER VOLATILE` (mig 59, reescrita v2 en mig 66, criterio 2 en mig 81) — Deduplicador PSD2. **Criterio 1:** empareja PENDING (`h_`) con BOOKED (`er_`) de la misma fecha por **descripción normalizada** (lower, sin `:`, espacios colapsados) + contención bidireccional, 1:1 estricto. **Criterio 2 (P-034, mig-81):** para pares cuyas descripciones NO se contienen (PENDING genérico tipo "EMISION"), casa por cuenta + importe exacto + fecha BOOKED ∈ [PENDING, PENDING+2], solo si el emparejamiento es **único en ambos lados** y el BOOKED no es ya destino de otro `h_`; si es ambiguo no casa (queda para `fn_pending_review_dups`). Marca el duplicado con `superseded_by` y hereda categoría/proyecto/nature del pending si el booked está sin decidir. Devuelve nº de filas neutralizadas. **T-040:** no casa si el banco mueve la fecha entre pending y booked.
 
 ### `public.fn_pending_review_dups() → TABLE(account_name text, txn_date date, amount numeric, description text, n bigint)` ‹recon 8-jul›
 `sql SECURITY INVOKER STABLE` (mig 60) — Lista grupos de posibles duplicados ambiguos pendientes de revisión humana. Excluye grupos donde todas las filas tienen `dup_reviewed_at` no nulo. Alimenta la cola de `/estado`.
@@ -1165,6 +1165,29 @@ Efectivo en tránsito hacia Trade Republic (D-031). **Una fila por salida no emp
 
 ---
 
+### 3.22 · `public.v_balance_anchor` *(mig 82)*
+
+Conciliación EGMFin vs banco (P-034). **Una fila por cuenta activa con `balance_checks`** (excluye `broker`, `investment`, `card`). Para cada check reconstruye el saldo de EGMFin a esa fecha con la regla de `account_balances_full` (rama ELSE): `initial_balance` + movimientos vigentes de la cuenta + de sus tarjetas débito.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `account_id` | uuid | `accounts.id` |
+| `account_name` | text | `accounts.name` |
+| `last_check_date` | date | Último `balance_checks.check_date` |
+| `calc_balance` | numeric | Saldo EGMFin a `last_check_date` |
+| `real_balance` | numeric | Saldo del banco en ese check |
+| `delta` | numeric | `calc_balance − real_balance` |
+| `last_ok_date` | date | Último check con \|delta\| ≤ 0,01 (NULL si nunca) |
+| `mismatch_since` | date | Primer check descuadrado tras `last_ok_date` (NULL si cuadra) |
+| `status` | text | `ok` / `ambar` / `rojo` |
+
+**Status por persistencia:** `ok` = el último check cuadra · `ambar` = descuadra, pero alguno de los últimos 10 días (hasta el último check) cuadró · `rojo` = ninguno de los últimos 10 días cuadra. Motivo: banco y PSD2 van desfasados 1+ días casi siempre (tarjetas, fines de semana); la regla "2 checks consecutivos" daba rojo 32 de 83 días en Santander. Con 10 días: 6 (25→31-jul) y el error real de P-034 habría saltado el 11-sep.  
+**Security_invoker:** true (hereda RLS de `accounts`, `balance_checks`, `transactions`). **GRANT:** `SELECT` a `authenticated`.  
+**Smoke test 12-oct:** Kutxabank, MyInvestor común TAE, TR Efectivo Eric → `ok`; Santander común → `ambar` (delta +43,22 desde 09-oct: movimientos del fin de semana aún no entregados por PSD2; último ok 08-oct).  
+**Consumidor:** `check_alarms.py` (`EXTRA_VIEWS`) → `egmfin-alarmas`.
+
+---
+
 ## 4 · GRANTs resumen por tabla
 
 | Tabla | authenticated SELECT | INSERT | UPDATE | DELETE | Notas |
@@ -1297,6 +1320,8 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20261011000078 | `v_manual_account_freshness.sql` | D-030: vista de alerta de cuenta manual sin anclar (una fila por cuenta: activa, bank/cash/tesoreria_tae, titular eric/comun, sin link PSD2 activo, saldo ≥ 100). ok ≤21 / ambar 22–35 / rojo >35 días o nunca. security_invoker + GRANT authenticated. Smoke test 11-oct: 1 fila (TR Eric, ok). Ver §3.20. |
 | 20261012000079 | `v_cash_in_transit.sql` | D-031: NUEVA v_cash_in_transit (salida PSD2 → TR sin entrada emparejada, 1:1 por importe, ventana −2/+7, ok ≤21 / rojo >21). REPLACE v_cuentas_composicion (+ tránsito en Efectivo/eric) y v_cuentas_detalle (+ fila sintética account_id NULL), mismas columnas. Efectivo eric 15.704,53 → 20.204,53. Ver §3.21. |
 | 20261012000080 | `fix_santander_pending_emision.sql` | P-034 (DML): `superseded_by` en 2 PENDING h_ "EMISION" de Santander común del 01-sep (−775,66 → er_2026-09-01.0 Justa Cámara; −100,00 → er_2026-09-01.2 Leo). fn_supersede_pending_booked no los casó por descripción distinta. Elimina el desfase fijo de −875,66. Reversible, sin DELETE. |
+| 20261012000081 | `dedup_pending_desc_generica.sql` | P-034: fn_supersede_pending_booked + criterio 2 (descripción distinta → importe + fecha BOOKED ∈ [PENDING, +2], único en ambos lados, BOOKED no usado). Prueba ROLLBACK caso 01-sep: −775,66 casa, −100,00 no (ambiguo Leo/Biel); 1 casado en toda la BBDD. |
+| 20261012000082 | `v_balance_anchor.sql` | P-034: vista de conciliación EGMFin vs balance_checks; status por persistencia (ok / ambar / rojo si ningún check cuadra en 10 días). Ver §3.22. |
 
 ---
 

@@ -344,7 +344,7 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
-## P-034 · 12-oct-2026 · **CORRECCIÓN DE DATOS** (mig-80) + limitación del deduplicador
+## P-034 · 12-oct-2026 · **RESUELTO** (mig-80 datos · mig-81 deduplicador · mig-82 alarma)
 **Santander común descuadrada −875,66 desde el 01-sep: dos PENDING "EMISION" sin neutralizar**
 
 **Síntoma:** conciliación 12-oct: EGMFin −489,71 vs banco 342,73 (delta −832,44). En julio cuadraba al céntimo.
@@ -357,7 +357,11 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 **Residuo de hoy (+43,22) — NO es error de datos:** tras el arreglo EGMFin = 385,95 (cuadra con el banco al 08-oct). El banco bajó −33,40 el 10-oct (sábado) y −9,82 el 11-oct (domingo); en EGMFin no hay ningún movimiento de Santander posterior al 09-oct (sync 11-oct: 0 insertados; 12-oct: 1, de otra cuenta). Movimientos que el banco ya descuenta y PSD2 aún no entrega → se resuelve solo. No se inventan movimientos.
 
-**Limitación conocida (no corregida, decisión pendiente):** `fn_supersede_pending_booked` falla cuando el PENDING trae una descripción genérica ("EMISION") distinta de la del BOOKED. Opción futura: si el PENDING lleva descripción genérica y hay un único BOOKED del mismo importe/fecha/cuenta, casar sin exigir descripción. No se toca el deduplicador sin decisión de Eric.
+**Deduplicador (mig-81):** `fn_supersede_pending_booked` gana un **criterio 2** solo para pares cuyas descripciones no se contienen: misma cuenta, importe exacto, fecha BOOKED ∈ [PENDING, PENDING+2], BOOKED no usado ya, y emparejamiento **único en ambos lados**. Si hay ambigüedad no casa (queda para `fn_pending_review_dups`). Prueba con ROLLBACK (desmarcados los dos h_ del 01-sep): la función casó 1 en toda la BBDD — el −775,66 con Justa Cámara — y dejó el −100,00 sin casar (ambiguo Leo/Biel). Dry-run previo: ninguno de los 47 h_ activos de Kutxabank se ve afectado.
+
+**Alarma (mig-82):** `v_balance_anchor` compara el saldo de EGMFin con cada `balance_checks`. Status por persistencia: ok si el último check cuadra; ambar si descuadra pero algún check de los últimos 10 días cuadró; rojo si ninguno cuadra en 10 días. La regla "2 checks consecutivos" se descartó: daba rojo 32 de 83 días en Santander por desfase de fechas banco/PSD2. Con la nueva, el error del 01-sep habría avisado el 11-sep (en vez de 6 semanas en silencio). `check_alarms.py` la lee vía `EXTRA_VIEWS`.
+
+**Regla permanente:** todo saldo con ancla externa diaria (D-026) tiene que estar vigilado por `v_balance_anchor`; un `balance_checks` que nadie compara no es un control.
 
 ---
 

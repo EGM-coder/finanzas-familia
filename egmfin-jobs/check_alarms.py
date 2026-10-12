@@ -98,6 +98,15 @@ def describe_cash_in_transit(row: dict) -> str:
     )
 
 
+def describe_balance_anchor(row: dict) -> str:
+    desde = row.get('mismatch_since')
+    return (
+        f"{row['account_name']}: EGMFin {fmt_eur(row['calc_balance'])} vs banco "
+        f"{fmt_eur(row['real_balance'])} (delta {fmt_eur(row['delta'])})"
+        + (f" desde {fmt_day(desde)}" if desde else "")
+    )
+
+
 def describe_generic(view: str, row: dict) -> str:
     fields = ', '.join(f"{k}={v}" for k, v in row.items() if k != 'status' and v is not None)
     return f"{view}: {fields}"
@@ -108,10 +117,11 @@ DESCRIBERS = {
     'v_income_freshness':         describe_income,
     'v_manual_account_freshness': describe_manual_account,
     'v_cash_in_transit':          describe_cash_in_transit,
+    'v_balance_anchor':           describe_balance_anchor,
 }
 
-# Vistas de alarma que no siguen el patrón v_*_freshness: se leen siempre (D-031).
-EXTRA_VIEWS = ['v_cash_in_transit']
+# Vistas de alarma que no siguen el patrón v_*_freshness: se leen siempre (D-031, P-034).
+EXTRA_VIEWS = ['v_cash_in_transit', 'v_balance_anchor']
 
 
 # ── Lectura ──────────────────────────────────────────────────
