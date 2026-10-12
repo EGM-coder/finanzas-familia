@@ -344,6 +344,23 @@ Resuelto en mig-66. Limitación residual → T-040 (fecha valor distinta entre P
 
 ---
 
+## P-034 · 12-oct-2026 · **CORRECCIÓN DE DATOS** (mig-80) + limitación del deduplicador
+**Santander común descuadrada −875,66 desde el 01-sep: dos PENDING "EMISION" sin neutralizar**
+
+**Síntoma:** conciliación 12-oct: EGMFin −489,71 vs banco 342,73 (delta −832,44). En julio cuadraba al céntimo.
+
+**Diagnóstico (serie diaria vs `balance_checks`):** el delta oscila a diario por desfase de fechas (el banco cuenta movimientos que PSD2 entrega un día después), pero vuelve a 0 con regularidad. El 24-ago es el último 0; desde el **01-sep** aparece un desfase **fijo de −875,66** que se mantiene en todos los días "limpios" (01-sep, 07-sep, 14-sep, 19→23-sep, 08-oct).
+
+**Causa raíz:** el 01-sep PSD2 entregó dos movimientos PENDING (`h_…`) con descripción **"EMISION"** (−775,66 y −100,00). Sus BOOKED (`er_…`) llegaron el 02-sep con la descripción real ("TRANSFERENCIA A FAVOR DE Justa Cámara… Alquiler", "…Leo…", "…Biel…"). `fn_supersede_pending_booked` exige `e.norm_desc = h.norm_desc` o que una contenga a la otra → "EMISION" no casa → los dos `h_` quedaron activos → gasto contado dos veces. 775,66 + 100,00 = **875,66**. No tiene relación con el apagón 23-sep → 08-oct. Búsqueda sistemática (mismo importe, ±2 días, h_ activo vs er_ activo) en Santander y sus tarjetas: **solo estos dos**.
+
+**Corrección (mig-80):** `superseded_by` en ambos `h_` (−775,66 → `er_2026-09-01.0`; −100,00 → `er_2026-09-01.2` Leo, el que elegiría la propia función por menor `e.id`). Reversible. Tras aplicar: el desfase fijo desaparece y la serie vuelve a 0 en los días limpios.
+
+**Residuo de hoy (+43,22) — NO es error de datos:** tras el arreglo EGMFin = 385,95 (cuadra con el banco al 08-oct). El banco bajó −33,40 el 10-oct (sábado) y −9,82 el 11-oct (domingo); en EGMFin no hay ningún movimiento de Santander posterior al 09-oct (sync 11-oct: 0 insertados; 12-oct: 1, de otra cuenta). Movimientos que el banco ya descuenta y PSD2 aún no entrega → se resuelve solo. No se inventan movimientos.
+
+**Limitación conocida (no corregida, decisión pendiente):** `fn_supersede_pending_booked` falla cuando el PENDING trae una descripción genérica ("EMISION") distinta de la del BOOKED. Opción futura: si el PENDING lleva descripción genérica y hay un único BOOKED del mismo importe/fecha/cuenta, casar sin exigir descripción. No se toca el deduplicador sin decisión de Eric.
+
+---
+
 ## P-033 · 08-oct-2026 · **PERMANENTE**
 **Nunca imprimir valores de variables de entorno ni de `.env` — ni siquiera "solo los nombres"**
 

@@ -1,6 +1,6 @@
 # EGMFin · SCHEMA.md — Fuente de verdad (10-jul-2026)
 
-> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **79 migraciones** aplicadas (hasta `20261012000079`).  
+> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **80 migraciones** aplicadas (hasta `20261012000080`).  
 > **Reconciliación 8-jul-2026:** el doc estaba congelado en mig-50 (7-jun). Esta revisión incorpora migs 51–71 del sprint de módulo cuentas (12-jun) y saneamiento/observabilidad (28-jun→06-jul). Cambios marcados con `‹recon 8-jul›`.  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible. Volcado por MCP en su lugar.  
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8). El desfase de 21 migraciones que motivó esta reconciliación es la prueba de por qué PRO-8 no es opcional.  
@@ -1296,6 +1296,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20261011000077 | `backfill_trade_republic_jul_oct.sql` | D-029 (DML): INSERT 20 movimientos extracto TR 08-jul → 01-oct-2026 (`tr_bf_YYYYMMDD_N`, ON CONFLICT DO NOTHING), source='backfill_extracto'. 7 interés/dividendo → nature='inversion'; 13 tarjeta (PayPal, DAZN, Selecta) → nature/category/project NULL, pendientes de Eric. balance_check 2026-10-10 = 13.004,87 (extracto_tr). **TR anclado a 10-oct-2026.** Verificado: current_balance = 13.004,87; 70 movimientos. Holdings sin tocar. |
 | 20261011000078 | `v_manual_account_freshness.sql` | D-030: vista de alerta de cuenta manual sin anclar (una fila por cuenta: activa, bank/cash/tesoreria_tae, titular eric/comun, sin link PSD2 activo, saldo ≥ 100). ok ≤21 / ambar 22–35 / rojo >35 días o nunca. security_invoker + GRANT authenticated. Smoke test 11-oct: 1 fila (TR Eric, ok). Ver §3.20. |
 | 20261012000079 | `v_cash_in_transit.sql` | D-031: NUEVA v_cash_in_transit (salida PSD2 → TR sin entrada emparejada, 1:1 por importe, ventana −2/+7, ok ≤21 / rojo >21). REPLACE v_cuentas_composicion (+ tránsito en Efectivo/eric) y v_cuentas_detalle (+ fila sintética account_id NULL), mismas columnas. Efectivo eric 15.704,53 → 20.204,53. Ver §3.21. |
+| 20261012000080 | `fix_santander_pending_emision.sql` | P-034 (DML): `superseded_by` en 2 PENDING h_ "EMISION" de Santander común del 01-sep (−775,66 → er_2026-09-01.0 Justa Cámara; −100,00 → er_2026-09-01.2 Leo). fn_supersede_pending_booked no los casó por descripción distinta. Elimina el desfase fijo de −875,66. Reversible, sin DELETE. |
 
 ---
 
