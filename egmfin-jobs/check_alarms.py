@@ -9,7 +9,8 @@ Este script las lee y traduce su estado a un ping externo:
   - no se puede leer la base       → ping('egmfin-alarmas', 'fail', motivo) — base pausada/caída
 
 Descubre las vistas v_*_freshness en cada ejecución vía la especificación OpenAPI
-de PostgREST (refleja lo expuesto en el schema public). No crea nada en BBDD.
+de PostgREST (refleja lo expuesto en el schema public). Además lee siempre las vistas
+de EXTRA_VIEWS (p.ej. v_cash_in_transit, D-031); si una no existe → rojo. No crea nada en BBDD.
 
 Disparo: step final del workflow sync_psd2 (ver .github/workflows/sync_psd2.yml).
 
@@ -90,6 +91,13 @@ def describe_manual_account(row: dict) -> str:
     )
 
 
+def describe_cash_in_transit(row: dict) -> str:
+    return (
+        f"{fmt_eur(row['amount'])} € en tránsito a TR desde {fmt_day(row['date'])}, "
+        f"sin extracto que lo confirme ({row['days_in_transit']} días)"
+    )
+
+
 def describe_generic(view: str, row: dict) -> str:
     fields = ', '.join(f"{k}={v}" for k, v in row.items() if k != 'status' and v is not None)
     return f"{view}: {fields}"
@@ -99,24 +107,32 @@ def describe_generic(view: str, row: dict) -> str:
 DESCRIBERS = {
     'v_income_freshness':         describe_income,
     'v_manual_account_freshness': describe_manual_account,
+    'v_cash_in_transit':          describe_cash_in_transit,
 }
+
+# Vistas de alarma que no siguen el patrón v_*_freshness: se leen siempre (D-031).
+EXTRA_VIEWS = ['v_cash_in_transit']
 
 
 # ── Lectura ──────────────────────────────────────────────────
 
-def discover_freshness_views() -> list[str]:
+def discover_freshness_views() -> tuple[list[str], list[str]]:
+    """Devuelve (vistas a leer, vistas EXTRA_VIEWS que no existen)."""
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1/",
         headers={'apikey': SUPABASE_SERVICE_KEY, 'Authorization': f"Bearer {SUPABASE_SERVICE_KEY}"},
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         spec = json.load(resp)
+    paths = spec.get('paths', {})
     views = []
-    for path in spec.get('paths', {}):
+    for path in paths:
         m = FRESHNESS_RE.match(path)
         if m:
             views.append(m.group(1))
-    return sorted(views)
+    missing = [v for v in EXTRA_VIEWS if f"/{v}" not in paths]
+    views += [v for v in EXTRA_VIEWS if v not in missing]
+    return sorted(views), missing
 
 
 def collect_reds(sb, views: list[str]) -> tuple[list[str], dict]:
@@ -147,8 +163,8 @@ def main() -> None:
 
     try:
         sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-        views = discover_freshness_views()
-        logger.info("Vistas de frescura encontradas: %s", views)
+        views, missing = discover_freshness_views()
+        logger.info("Vistas de alarma encontradas: %s", views)
         reds, statuses = collect_reds(sb, views)
     except Exception as e:
         # Base pausada/caída: justo lo que la vigilancia interna no puede contar
@@ -158,6 +174,8 @@ def main() -> None:
 
     if not views:
         reds.append("check_alarms: no se encontró ninguna vista v_*_freshness")
+    for v in missing:
+        reds.append(f"check_alarms: no existe la vista de alarma {v}")
 
     for view, sts in statuses.items():
         logger.info("  %s → %s", view, sts)

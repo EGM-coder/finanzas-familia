@@ -1,6 +1,6 @@
 # EGMFin · SCHEMA.md — Fuente de verdad (10-jul-2026)
 
-> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **78 migraciones** aplicadas (hasta `20261011000078`).  
+> **Generado desde:** reconciliación contra BBDD real vía Supabase MCP (introspección `pg_catalog`/`information_schema`), cotejada con el ledger `supabase_migrations.schema_migrations`. Cubre las **79 migraciones** aplicadas (hasta `20261012000079`).  
 > **Reconciliación 8-jul-2026:** el doc estaba congelado en mig-50 (7-jun). Esta revisión incorpora migs 51–71 del sprint de módulo cuentas (12-jun) y saneamiento/observabilidad (28-jun→06-jul). Cambios marcados con `‹recon 8-jul›`.  
 > **Herramienta:** `npx supabase db dump --linked` requiere Docker — no disponible. Volcado por MCP en su lugar.  
 > **Mantenimiento:** actualizar en el mismo commit que cualquier migración nueva (PRO-1 + PRO-8). El desfase de 21 migraciones que motivó esta reconciliación es la prueba de por qué PRO-8 no es opcional.  
@@ -1047,7 +1047,7 @@ Vista de conciliación de nóminas Nordex a nivel mes. Cruza `incomes` (source=`
 
 ---
 
-### 3.15 · `public.v_cuentas_composicion` *(mig 53)* ‹recon 8-jul›
+### 3.15 · `public.v_cuentas_composicion` *(mig 53, + tránsito mig 79)* ‹recon 8-jul›
 
 **Base del futuro Front 2 (barra Pictet · lado "real").** Composición del patrimonio líquido por titular y clase de activo. **No incluye inmuebles ni stock options** (patrimonio contingente/no líquido, excluido por diseño).
 
@@ -1060,16 +1060,17 @@ Vista de conciliación de nóminas Nordex a nivel mes. Cruza `incomes` (source=`
 | `orden` | int | orden de apilado (1–5) |
 | `valor` | numeric | suma en EUR del segmento para ese titular |
 
-**Fuentes UNION:** `Efectivo` = `account_balances_full.current_balance` de cuentas type ∈ (bank, cash, tesoreria_tae); `RV+ETF/Indexados/Cripto` = `holdings_valued.current_value_eur` mapeando `asset_type` (accion/etf→RV+ETF, fondo_indexado→Indexados, cripto→Cripto); `Roboadvisor` = `manual_holdings.current_value_eur`.  
+**Fuentes UNION:** `Efectivo` = `account_balances_full.current_balance` de cuentas type ∈ (bank, cash, tesoreria_tae); `RV+ETF/Indexados/Cripto` = `holdings_valued.current_value_eur` mapeando `asset_type` (accion/etf→RV+ETF, fondo_indexado→Indexados, cripto→Cripto); `Roboadvisor` = `manual_holdings.current_value_eur`; **+ (mig-79, D-031)** `Efectivo` de `eric` suma `sum(v_cash_in_transit.amount)` si > 0 (efectivo en tránsito hacia TR).  
 **⚠ Agrupa por `titular`** — para composición combinada del hogar hay que sumar sobre titular en la capa que consuma la vista. La D-serie de asignación objetivo debe usar **estos mismos 5 segmentos**.  
-**Security_invoker:** true (verificar en el próximo pase; el resto de las 18 vistas lo son).
+**Security_invoker:** true (verificado 12-oct, mig-79).
 
 ---
 
-### 3.16 · `public.v_cuentas_detalle` *(mig 54)* ‹recon 8-jul›
+### 3.16 · `public.v_cuentas_detalle` *(mig 54, + tránsito mig 79)* ‹recon 8-jul›
 
-Igual que `v_cuentas_composicion` pero a grano de cuenta individual (añade `account_id`, `name`, `institution`, `visibility`). Alimenta el drill-down de `/cuentas`.  
-**Security_invoker:** true (verificar).
+Igual que `v_cuentas_composicion` pero a grano de cuenta individual (añade `account_id`, `name`, `institution`, `visibility`). Alimenta el drill-down de `/cuentas` (`SegmentoView`).  
+**+ (mig-79, D-031):** fila sintética `account_id = NULL`, `name = 'En tránsito → Trade Republic'`, `institution = 'Trade Republic'`, `visibility = 'privada_eric'`, `titular = 'eric'`, `segmento = 'Efectivo'`, `valor = sum(v_cash_in_transit.amount)` — solo si > 0. El frontend la pinta no navegable.  
+**Security_invoker:** true (verificado 12-oct, mig-79).
 
 ---
 
@@ -1137,6 +1138,30 @@ Umbrales sobre `current_date − max(balance_checks.check_date)`: ok ≤ 21 día
 **GRANT:** `SELECT` a `authenticated`.  
 **Smoke test 11-oct:** 1 fila — Trade Republic Efectivo Eric, `last_check_date=2026-10-10`, `status=ok`. MyInvestor común TAE (9,43 €) fuera por materialidad.  
 **Consumidor externo:** `egmfin-jobs/check_alarms.py` → Healthchecks `egmfin-alarmas` (P-031), un motivo por cuenta en rojo.
+
+---
+
+### 3.21 · `public.v_cash_in_transit` *(mig 79)*
+
+Efectivo en tránsito hacia Trade Republic (D-031). **Una fila por salida no emparejada.**
+
+- **Salidas candidatas:** `transactions` con `amount < 0`, `superseded_by IS NULL`, `counterparty ILIKE '%ERIC GAHIMBARE%'`, `description ILIKE '%1586%'` (1586 = código de entidad TR), en cuentas con link activo en `bank_account_links`.
+- **Entradas TR:** cuenta `7794e395-…` (TR Efectivo Eric), `amount > 0`, `nature = 'transferencia'`, `superseded_by IS NULL`.
+- **Emparejamiento 1:1 determinista:** `row_number()` por importe absoluto ordenado por `(date, id)` en ambos lados; la n-ésima salida de un importe casa con la n-ésima entrada del mismo importe si la fecha TR ∈ [salida − 2, salida + 7] días.
+- **Guarda de privacidad:** solo devuelve filas si el invocador ve la cuenta TR (RLS vía `security_invoker`).
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `transaction_id` | uuid | Salida en la cuenta PSD2 |
+| `source_account` | text | `accounts.name` de origen |
+| `date` | date | Fecha de la salida |
+| `amount` | numeric | Importe en positivo |
+| `days_in_transit` | int | `current_date − date` |
+| `status` | text | `ok` (≤ 21 días) / `rojo` (> 21) |
+
+**Consumidores:** `v_cuentas_composicion` y `v_cuentas_detalle` (suma en Efectivo/eric); `/cuentas` (días); `check_alarms.py` (`EXTRA_VIEWS`) → `egmfin-alarmas`.  
+**Security_invoker:** true. **GRANT:** `SELECT` a `authenticated`.  
+**Smoke test 12-oct:** 1 fila — Kutxabank 2026-10-11, 4.500,00, `ok`. 29-may (−5.000) y 10-jun (−12.000) emparejadas con TR 29-may / 12-jun. Prueba BEGIN…ROLLBACK con entrada TR +4.500 del 12-oct → vista vacía y Efectivo eric sin cambio (20.204,53).
 
 ---
 
@@ -1270,6 +1295,7 @@ Dos grupos con sufijos numéricos solapados (P-015 — no renombrar; Supabase or
 | 20261008000076 | `v_income_freshness_secundaria.sql` | T-042: CREATE OR REPLACE v_income_freshness, misma firma. Solo señal secundaria: ambar >62 / rojo >75 días (antes >40 / >55, rojo falso mensual). Primaria intacta. Aplicada por `db push` (P-028, vía única). Verificado 08-oct: status=ok. |
 | 20261011000077 | `backfill_trade_republic_jul_oct.sql` | D-029 (DML): INSERT 20 movimientos extracto TR 08-jul → 01-oct-2026 (`tr_bf_YYYYMMDD_N`, ON CONFLICT DO NOTHING), source='backfill_extracto'. 7 interés/dividendo → nature='inversion'; 13 tarjeta (PayPal, DAZN, Selecta) → nature/category/project NULL, pendientes de Eric. balance_check 2026-10-10 = 13.004,87 (extracto_tr). **TR anclado a 10-oct-2026.** Verificado: current_balance = 13.004,87; 70 movimientos. Holdings sin tocar. |
 | 20261011000078 | `v_manual_account_freshness.sql` | D-030: vista de alerta de cuenta manual sin anclar (una fila por cuenta: activa, bank/cash/tesoreria_tae, titular eric/comun, sin link PSD2 activo, saldo ≥ 100). ok ≤21 / ambar 22–35 / rojo >35 días o nunca. security_invoker + GRANT authenticated. Smoke test 11-oct: 1 fila (TR Eric, ok). Ver §3.20. |
+| 20261012000079 | `v_cash_in_transit.sql` | D-031: NUEVA v_cash_in_transit (salida PSD2 → TR sin entrada emparejada, 1:1 por importe, ventana −2/+7, ok ≤21 / rojo >21). REPLACE v_cuentas_composicion (+ tránsito en Efectivo/eric) y v_cuentas_detalle (+ fila sintética account_id NULL), mismas columnas. Efectivo eric 15.704,53 → 20.204,53. Ver §3.21. |
 
 ---
 

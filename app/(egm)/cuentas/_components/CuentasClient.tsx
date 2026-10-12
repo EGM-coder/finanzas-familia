@@ -19,6 +19,7 @@ type Props = {
   stockOptions:        StockOptionRow[]
   holdings:            HoldingRow[]
   detalleRows:         DetalleRow[]
+  transitDays:         number | null
   pricesByTicker:      Record<string, PricePoint[]>
   pricesByIsin:        Record<string, PricePoint[]>
   manualHoldings:      ManualHoldingRow[]
@@ -54,7 +55,7 @@ const CARD: React.CSSProperties = {
 export function CuentasClient({
   rows, totalByTitular, totalTodo,
   stockOptions, holdings,
-  detalleRows, pricesByTicker, pricesByIsin, manualHoldings,
+  detalleRows, transitDays, pricesByTicker, pricesByIsin, manualHoldings,
   txnsByAccount, debitCardsByParent,
 }: Props) {
   const titulares = TITULAR_ORDER.filter(t => totalByTitular[t] != null)
@@ -155,6 +156,7 @@ export function CuentasClient({
       <div className="card fade fade-2" style={{ ...CARD, maxWidth: 640 }}>
         <SegmentoView
           detalleRows={detalleRows}
+          transitDays={transitDays}
           active={active}
           activeLabel={activeLabel}
           segmento={frame.segmento}

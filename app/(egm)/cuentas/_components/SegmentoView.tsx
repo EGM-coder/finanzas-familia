@@ -3,6 +3,7 @@ import type { DetalleRow } from '../page'
 
 type Props = {
   detalleRows:  DetalleRow[]
+  transitDays:  number | null
   active:       string
   activeLabel:  string
   segmento:     string
@@ -20,7 +21,7 @@ const TITULAR_LABEL: Record<string, string> = {
 }
 
 export function SegmentoView({
-  detalleRows, active, activeLabel, segmento, segmentoTotal, total, onSelectAccount,
+  detalleRows, transitDays, active, activeLabel, segmento, segmentoTotal, total, onSelectAccount,
 }: Props) {
   const accounts = detalleRows
     .filter(r => r.segmento === segmento && (active === 'todo' || r.titular === active))
@@ -49,10 +50,41 @@ export function SegmentoView({
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {accounts.map((r, i) => (
+          {accounts.map((r, i) => r.account_id === null ? (
+            // D-031: efectivo en tránsito — no es una cuenta, no navegable
+            <div
+              key={'transit' + r.segmento}
+              style={{
+                display:       'grid',
+                gridTemplateColumns: 'auto 1fr auto auto',
+                alignItems:    'center',
+                gap:           12,
+                padding:       '12px 8px',
+                borderTop:     i > 0 ? '1px solid var(--rule-2)' : undefined,
+              }}
+            >
+              {/* Hueco del badge: mantiene la alineación, sin icono */}
+              <div style={{ width: 32, height: 32, flexShrink: 0 }} />
+
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {r.name}
+                </div>
+                <div className="roman" style={{ fontSize: 11 }}>
+                  pendiente de extracto
+                  {transitDays != null && `, ${transitDays} ${transitDays === 1 ? 'día' : 'días'}`}
+                </div>
+              </div>
+
+              <span className="num" style={{ fontSize: 14 }}>{fmt(r.valor)} €</span>
+
+              {/* Hueco de la flecha */}
+              <span style={{ fontSize: 14, visibility: 'hidden' }}>›</span>
+            </div>
+          ) : (
             <div
               key={r.account_id + r.segmento}
-              onClick={() => onSelectAccount(r.account_id, r.name, r.institution)}
+              onClick={() => onSelectAccount(r.account_id!, r.name, r.institution)}
               className="egm-row-clickable"
               style={{
                 display:       'grid',

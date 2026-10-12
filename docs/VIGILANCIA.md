@@ -36,6 +36,7 @@ Los checks autoprovisionados nacen con período 1 día / gracia 1 h. **Hay que a
 | Supabase pausada o caída | `egmfin-alarmas` → `fail` ("no puede leer Supabase"); los jobs → `fail` |
 | Dato desfasado (nómina sin casar, etc.) | `egmfin-alarmas` → `fail` con el motivo |
 | Cuenta manual sin anclar (> 35 días sin extracto) | `egmfin-alarmas` → `fail` con la cuenta |
+| Transferencia a TR sin confirmar (> 21 días) | `egmfin-alarmas` → `fail` con importe y fecha |
 
 ## Alarmas de datos (vistas `v_*_freshness`)
 
@@ -43,6 +44,7 @@ Los checks autoprovisionados nacen con período 1 día / gracia 1 h. **Hay que a
 |-------|-------|-------------|-------|
 | `v_income_freshness` | 1 | abono Nordex sin casar > 15 días, o > 75 días sin nómina | 11–15 días / 63–75 días |
 | `v_manual_account_freshness` (D-030) | 1 por cuenta manual material | último `balance_checks` hace > 35 días, o nunca anclada | 22–35 días |
+| `v_cash_in_transit` (D-031) · *no sigue el patrón `_freshness`: listada en `EXTRA_VIEWS` de `check_alarms.py`* | 1 por transferencia a TR sin entrada emparejada | > 21 días en tránsito | — |
 
 `v_manual_account_freshness` vigila las cuentas sin PSD2 del perímetro v1 (titular `eric`/`comun`) con saldo ≥ 100 €. Hoy: solo Trade Republic Efectivo Eric. El ámbar no envía correo; solo el rojo.
 | Repo sin actividad 60 días → crons desactivados | Lo previene `keepalive.yml`; si falla, `egmfin-keepalive` |
@@ -58,6 +60,8 @@ Los checks autoprovisionados nacen con período 1 día / gracia 1 h. **Hay que a
      - "Nómina: abono … sin nómina casada" (> 15 días) → el casado diario no pudo casarlo: o falta la nómina, o no cuadra al céntimo, o hay dos abonos con el mismo período. Subir el PDF de la nómina al bucket `nominas` y lanzar `parse_nominas` (casa solo si cuadra al céntimo). Si no cuadra, casar a mano en /ingresos.
      - "Nómina: última nómina … hace N días" (> 75 días) → faltan dos nóminas: subir los PDFs y lanzar `parse_nominas`.
      - "<cuenta>: último extracto hace N días" / "nunca anclada" (> 35 días) → **descargar el extracto de TR (o de la cuenta indicada) y subirlo al chat de Claude**. Claude carga los movimientos (D-029, `tr_bf_YYYYMMDD_N`) y el `balance_checks` nuevo; con eso vuelve a `ok`.
+     - "N € en tránsito a TR desde <fecha>, sin extracto que lo confirme" (> 21 días) → descargar el extracto de TR y subirlo al chat de Claude. Al cargar la entrada (`nature='transferencia'`, mismo importe, fecha −2/+7 días) el tránsito desaparece solo. Si el extracto no la trae, la transferencia no llegó: revisar en el banco.
+     - "no existe la vista de alarma …" → una migración la ha borrado o renombrado; revisar `supabase/migrations/`.
      - "no puede leer Supabase" → dashboard de Supabase; si está pausada, **Restore project**.
    - `egmfin-keepalive` → log de keepalive (permisos `contents: write`).
 3. **Check en "down" sin `fail`** (no llegó ningún ping) → GitHub › Actions: ¿el workflow está desactivado ("This scheduled workflow is disabled…")? Reactivar con **Enable workflow** y lanzarlo a mano.

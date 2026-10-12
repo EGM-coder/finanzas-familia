@@ -36,7 +36,7 @@ export type HoldingRow = {
 }
 
 export type DetalleRow = {
-  account_id:  string
+  account_id:  string | null   // NULL = fila sintética "En tránsito → Trade Republic" (D-031)
   name:        string
   institution: string
   visibility:  string
@@ -84,7 +84,7 @@ export default async function CuentasPage() {
   const hundredTwentyAgo = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
   // ── Round 1 (all parallel) ─────────────────────────────────────
-  const [composicionRes, stockOptRes, holdingsRes, accountsRes, detalleRes, pricesRes, manualRes] =
+  const [composicionRes, stockOptRes, holdingsRes, accountsRes, detalleRes, pricesRes, manualRes, transitRes] =
     await Promise.all([
       supabase
         .from('v_cuentas_composicion')
@@ -117,6 +117,9 @@ export default async function CuentasPage() {
         .from('manual_holdings')
         .select('id, account_id, name, asset_type, current_value_eur, last_update_date')
         .eq('is_active', true),
+      supabase
+        .from('v_cash_in_transit')
+        .select('days_in_transit'),
     ])
 
   if (composicionRes.error) throw composicionRes.error
@@ -222,7 +225,7 @@ export default async function CuentasPage() {
 
   // ── Detalle ───────────────────────────────────────────────────
   const detalleRows: DetalleRow[] = (detalleRes.data ?? []).map(r => ({
-    account_id:  r.account_id as string,
+    account_id:  r.account_id as string | null,
     name:        r.name        as string,
     institution: r.institution as string,
     visibility:  r.visibility  as string,
@@ -231,6 +234,11 @@ export default async function CuentasPage() {
     orden:       Number(r.orden),
     valor:       Number(r.valor),
   }))
+
+  // ── Efectivo en tránsito (D-031) — días de la salida más antigua ─
+  const transitDays: number | null = (transitRes.data ?? []).reduce<number | null>(
+    (max, r) => Math.max(max ?? 0, Number(r.days_in_transit)), null,
+  )
 
   // ── Prices ────────────────────────────────────────────────────
   const pricesByTicker: Record<string, PricePoint[]> = {}
@@ -266,6 +274,7 @@ export default async function CuentasPage() {
       stockOptions={stockOptions}
       holdings={holdings}
       detalleRows={detalleRows}
+      transitDays={transitDays}
       pricesByTicker={pricesByTicker}
       pricesByIsin={pricesByIsin}
       manualHoldings={manualHoldings}
